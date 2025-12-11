@@ -98,15 +98,23 @@ class NDEFHelper private constructor(
      *    and then writes a single NDEF MIME record into that file.
      */
     fun writeDualSectionNdef(
-        roMimeType: String,      // kept for API compatibility, but not used here
-        roPayload: ByteArray,    // kept for API compatibility, but not used here
-        rwMimeType: String,
-        rwPayload: ByteArray
+        roMimeType: String,      // NPS MIME
+        roPayload: ByteArray,    // NPS JSON
+        rwMimeType: String,      // Extra MIME
+        rwPayload: ByteArray     // Extra JSON
     ): Boolean {
         return try {
+            // 1) Write the RO NPS into the Type-4 NDEF file in 000001
+            val npsOk = writeType4NdefRo(roMimeType, roPayload)
+            if (!npsOk) {
+                Log.e(TAG, "writeDualSectionNdef: failed to write RO NPS into Type-4 NDEF file")
+                return false
+            }
+
+            // 2) Prepare RW extra as NDEF MIME record for our private DESFire app
             val extraNdef = buildMimeNdefRecord(rwMimeType, rwPayload)
 
-            // Pad up a bit so that small growth in payload doesn't force re-creation
+            // Small safety margin so we don't recreate the file on every minor growth
             val extraSize = max(extraNdef.size + 16, MIN_EXTRA_FILE_SIZE)
 
             if (!ensureIpsAppAndExtraFile(extraSize)) {
@@ -116,12 +124,14 @@ class NDEFHelper private constructor(
 
             val okExtra = writeStandardFileInternal(FILE_EXTRA, extraNdef)
             Log.d(TAG, "writeDualSectionNdef: okExtra=$okExtra")
-            okExtra
+
+            npsOk && okExtra
         } catch (e: Exception) {
             Log.e(TAG, "writeDualSectionNdef failed", e)
             false
         }
     }
+
 
 
     /**
@@ -287,6 +297,65 @@ class NDEFHelper private constructor(
             ok
         } catch (e: Exception) {
             Log.e(TAG, "writeStandardFileInternal($fileNo) failed", e)
+            false
+        }
+    }
+
+    /**
+     * Write a single-message NDEF MIME record into the standard Type-4
+     * NDEF file in app 000001 (FILE_NDEF = 0x02).
+     *
+     * Layout in the file: [NLEN (2 bytes, BE)] + [NDEF message] + padding zeros.
+     */
+    private fun writeType4NdefRo(
+        mimeType: String,
+        payload: ByteArray
+    ): Boolean {
+        return try {
+            // 1) Select NFC Forum NDEF app (000001)
+            if (!desfire.selectApplication(NDEF_APP_AID)) {
+                Log.e(TAG, "writeType4NdefRo: failed to select NDEF app (000001)")
+                return false
+            }
+
+            // 2) Authenticate with app master key (00..00, key 0)
+            val appAuthOk = desfire.authenticate(DEFAULT_DES_KEY, KEYNO_MASTER, KeyType.DES)
+            if (!appAuthOk) {
+                Log.e(TAG, "writeType4NdefRo: app master key auth failed")
+                return false
+            }
+
+            // 3) Get file settings to know capacity of FILE_NDEF
+            val fs = desfire.getFileSettings(FILE_NDEF.toInt()) as? StandardDesfireFile
+                ?: run {
+                    Log.e(TAG, "writeType4NdefRo: FILE_NDEF not found or not Standard file")
+                    return false
+                }
+
+            val capacity = fs.fileSize
+            val ndefRecord = buildMimeNdefRecord(mimeType, payload)
+            val msgLen = ndefRecord.size
+
+            if (msgLen + 2 > capacity) {
+                Log.e(
+                    TAG,
+                    "writeType4NdefRo: NDEF message too large ($msgLen bytes) for capacity $capacity"
+                )
+                return false
+            }
+
+            val fileBytes = ByteArray(capacity) { 0 }
+            // NLEN (big-endian)
+            fileBytes[0] = ((msgLen shr 8) and 0xFF).toByte()
+            fileBytes[1] = (msgLen and 0xFF).toByte()
+            System.arraycopy(ndefRecord, 0, fileBytes, 2, msgLen)
+
+            // 4) Write into file 0x02 in current app
+            val ok = writeStandardFileInCurrentApp(FILE_NDEF, fileBytes)
+            Log.d(TAG, "writeType4NdefRo: writeStandardFileInCurrentApp -> $ok")
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "writeType4NdefRo failed", e)
             false
         }
     }
@@ -490,7 +559,7 @@ class NDEFHelper private constructor(
                 0x02,                   // fileNo
                 0x04, 0xE1.toByte(),    // ISO FID = E104
                 0x00,                   // comm settings (plain)
-                0xE0.toByte(), 0x00,            // access rights: free R/W
+                0xEE.toByte(), 0x00,             // access rights: free R/W
                 ndefSize0, ndefSize1, ndefSize2
             )
             val respCreateNdef = sendNative(0xCD.toByte(), createNdefFileBody)
@@ -539,7 +608,7 @@ class NDEFHelper private constructor(
             cc[11] = maxNdefLenHi
             cc[12] = maxNdefLenLo
             cc[13] = 0x00                // read access
-            cc[14] = 0xFF.toByte()                // write access
+            cc[14] = 0xFF.toByte()               // write access
 
             // Use our existing StandardFile writer (by fileNo)
             val ccOk = writeStandardFileInCurrentApp(0x01, cc)
@@ -624,6 +693,7 @@ class NDEFHelper private constructor(
         private val NDEF_APP_AID: ByteArray = byteArrayOf(0x01, 0x00, 0x00) // NFC Forum NDEF app (AN11004)
 
         // Only one file in this app: RW extra NDEF-like blob
+        private const val FILE_NDEF: Byte = 0x02   // NDEF data file inside 000001
         private const val FILE_EXTRA: Byte = 0x01
 
         // Default 8-byte DES key all zeros

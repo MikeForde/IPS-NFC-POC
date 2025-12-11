@@ -357,7 +357,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         val errors = mutableListOf<String>()
 
         // 1) RO / Historic via Android NDEF
-        val ndef = android.nfc.tech.Ndef.get(tag)
+        val ndef = Ndef.get(tag)
         if (ndef != null) {
             try {
                 ndef.connect()
@@ -438,60 +438,10 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
 
     private fun handleWriteDualNdef(tag: Tag) {
-        val techs = tag.techList.joinToString()
-
-        // 1) --- Write the read-only part as standard NDEF (Type 4) ---
-        val ndef = android.nfc.tech.Ndef.get(tag)
-
-        if (ndef == null) {
+        val helper = NDEFHelper.connect(tag, debug = true)
+        if (helper == null) {
             runOnUiThread {
-                statusText.text = "NDEF not available. Techs: $techs"
-                Toast.makeText(this, "Tag not exposed as NDEF by Android", Toast.LENGTH_LONG).show()
-                pendingAction = PendingAction.NONE
-            }
-            return
-        }
-
-        // Build NPS JSON text (RO part)
-        val npsText = textHistoric.text.toString().ifBlank {
-            """{"type":"historic","msg":"NPS default"}"""
-        }
-        val npsBytes = npsText.toByteArray(Charsets.UTF_8)
-
-        try {
-            ndef.connect()
-
-            // NDEF MIME media record for NATO Patient Summary
-            val npsRecord = android.nfc.NdefRecord.createMime(
-                "application/x.nps.v1-0",        // later: x.nps.gzip.v1-0
-                npsBytes
-            )
-
-            val message = android.nfc.NdefMessage(arrayOf(npsRecord))
-
-            // This is what vanilla NFC readers will see
-            ndef.writeNdefMessage(message)
-
-            // Optionally: make NDEF read-only; many tags don't support this
-            // val readOnlyOk = ndef.makeReadOnly()
-
-        } catch (e: Exception) {
-            e.printStackTrace()
-            runOnUiThread {
-                statusText.text = "Error writing NDEF: ${e.message}"
-                pendingAction = PendingAction.NONE
-            }
-            try { ndef.close() } catch (_: Exception) {}
-            return
-        } finally {
-            try { ndef.close() } catch (_: Exception) {}
-        }
-
-        // 2) --- Write the dual-section DESFire part via NDEFHelper (app 665544) ---
-        val ndefHelper = NDEFHelper.connect(tag, debug = true)
-        if (ndefHelper == null) {
-            runOnUiThread {
-                statusText.text = "DESFire (NDEFHelper) connect failed after NDEF write"
+                statusText.text = "Dual write: IsoDep / DESFire connect failed"
                 Toast.makeText(this, "DESFire connection failed", Toast.LENGTH_SHORT).show()
                 pendingAction = PendingAction.NONE
             }
@@ -499,40 +449,40 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
 
         try {
+            val npsText = textHistoric.text.toString().ifBlank {
+                """{"type":"historic","msg":"NPS default"}"""
+            }
             val rwText = textRw.text.toString().ifBlank {
                 """{"type":"rw","msg":"Default RW extra data"}"""
             }
-            val rwBytes = rwText.toByteArray(Charsets.UTF_8)
 
-            // Write:
-            //  - RO NPS blob into FILE_HIST (0x01) as NDEF MIME x.nps.v1-0
-            //  - RW extra blob into FILE_RW (0x02) as NDEF MIME x.ext.v1-0
-            val ok = ndefHelper.writeDualSectionNdef(
+            val ok = helper.writeDualSectionNdef(
                 roMimeType = "application/x.nps.v1-0",
-                roPayload = npsBytes,
+                roPayload = npsText.toByteArray(Charsets.UTF_8),
                 rwMimeType = "application/x.ext.v1-0",
-                rwPayload = rwBytes
+                rwPayload = rwText.toByteArray(Charsets.UTF_8)
             )
 
             runOnUiThread {
                 if (ok) {
-                    statusText.text = "Dual write OK: NDEF (RO) + DESFire dual section"
-                    Toast.makeText(this, "Wrote NDEF + DESFire RO/RW blobs", Toast.LENGTH_SHORT).show()
+                    statusText.text = "Dual write OK: Type-4 NDEF (RO) + DESFire extra (RW)"
+                    Toast.makeText(this, "Wrote RO NPS + RW extra", Toast.LENGTH_SHORT).show()
                 } else {
-                    statusText.text = "DESFire dual-section write failed"
+                    statusText.text = "Dual write FAILED (DESFire)"
                 }
                 pendingAction = PendingAction.NONE
             }
         } catch (e: Exception) {
             e.printStackTrace()
             runOnUiThread {
-                statusText.text = "Error writing DESFire dual-section: ${e.message}"
+                statusText.text = "Error during Dual write: ${e.message}"
                 pendingAction = PendingAction.NONE
             }
         } finally {
-            ndefHelper.close()
+            helper.close()
         }
     }
+
 
 
     private fun handleFormat(helper: DesfireHelper) {
