@@ -409,7 +409,7 @@ class NATOHelper private constructor(
         System.arraycopy(body, 0, apdu, 5, body.size)
 
         Log.d(TAG, "sendNative: INS=${String.format("0x%02X", ins)}, Lc=${body.size}")
-        val resp = desfire.transceive(apdu)
+        val resp = isoDep.transceive(apdu)
         val lastStatus = resp?.lastOrNull() ?: -1
         Log.d(
             TAG,
