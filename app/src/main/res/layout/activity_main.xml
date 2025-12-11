@@ -18,14 +18,6 @@
             android:textStyle="bold"
             android:paddingBottom="4dp" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Tap an action, then present a DESFire EVx card"
-            android:textSize="14sp"
-            android:textColor="@android:color/darker_gray"
-            android:paddingBottom="8dp" />
-
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
@@ -38,7 +30,7 @@
             android:id="@+id/statusText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Tap Write or Read, then tap card"
+            android:text="Tap action, then present a DESFire EVx card"
             android:textSize="15sp"
             android:padding="10dp"
             android:background="@android:color/darker_gray"
@@ -60,41 +52,80 @@
             android:gravity="center_horizontal"
             android:layout_marginBottom="12dp">
 
-            <Button
-                android:id="@+id/buttonWrite"
+            <!-- Column 1: Pure DESFire -->
+            <LinearLayout
+                android:orientation="vertical"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Write DESFire"
-                android:textAllCaps="false"
-                android:layout_marginEnd="6dp" />
+                android:layout_marginEnd="6dp">
 
-            <Button
-                android:id="@+id/buttonRead"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Read DESFire"
-                android:textAllCaps="false"
-                android:layout_marginStart="6dp" />
+                <Button
+                    android:id="@+id/buttonWrite"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Write DES"
+                    android:textAllCaps="false"
+                    android:layout_marginBottom="4dp" />
 
-            <Button
-                android:id="@+id/buttonWriteDualNdef"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Write Dual"
-                android:textAllCaps="false"
-                android:layout_marginHorizontal="6dp" />
+                <Button
+                    android:id="@+id/buttonRead"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Read DES"
+                    android:textAllCaps="false" />
+            </LinearLayout>
 
-            <Button
-                android:id="@+id/buttonReadDual"
+            <!-- Column 2: Dual (Type4 + DESFire) -->
+            <LinearLayout
+                android:orientation="vertical"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Read Dual"
-                android:textAllCaps="false" />
+                android:layout_marginHorizontal="6dp">
+
+                <Button
+                    android:id="@+id/buttonWriteDualNdef"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Write Dual"
+                    android:textAllCaps="false"
+                    android:layout_marginBottom="4dp" />
+
+                <Button
+                    android:id="@+id/buttonReadDual"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Read Dual"
+                    android:textAllCaps="false" />
+            </LinearLayout>
+
+            <!-- Column 3: NATO (two NDEF files in 000001) -->
+            <LinearLayout
+                android:orientation="vertical"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp">
+
+                <Button
+                    android:id="@+id/buttonWriteNato"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Write NATO"
+                    android:textAllCaps="false"
+                    android:layout_marginBottom="4dp" />
+
+                <Button
+                    android:id="@+id/buttonReadNato"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Read NATO"
+                    android:textAllCaps="false" />
+            </LinearLayout>
+
         </LinearLayout>
+
 
         <!-- Historic (RO) payload card -->
         <TextView
@@ -158,14 +189,14 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Maintenance"
+            android:text="Format Buttons"
             android:textStyle="bold"
             android:layout_marginBottom="4dp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Use with care – these operations can erase or reformat cards."
+            android:text="Use with care – these operations will erase cards."
             android:textSize="12sp"
             android:textColor="@android:color/holo_red_dark"
             android:layout_marginBottom="4dp" />
@@ -182,7 +213,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Format for DESFire"
+                android:text="DES"
                 android:textAllCaps="false"
                 android:layout_marginEnd="6dp"
                 android:textColor="@android:color/holo_red_dark" />
@@ -192,7 +223,17 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Format for Dual"
+                android:text="Dual"
+                android:textAllCaps="false"
+                android:layout_marginStart="6dp"
+                android:textColor="@android:color/holo_red_dark" />
+
+            <Button
+                android:id="@+id/buttonFormatForNATO"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="NATO"
                 android:textAllCaps="false"
                 android:layout_marginStart="6dp"
                 android:textColor="@android:color/holo_red_dark" />

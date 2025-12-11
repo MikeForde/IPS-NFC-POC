@@ -490,7 +490,7 @@ class NDEFHelper private constructor(
                 0x02,                   // fileNo
                 0x04, 0xE1.toByte(),    // ISO FID = E104
                 0x00,                   // comm settings (plain)
-                0xEE.toByte(), 0xEE.toByte(),             // access rights: free R/W
+                0xE0.toByte(), 0x00,            // access rights: free R/W
                 ndefSize0, ndefSize1, ndefSize2
             )
             val respCreateNdef = sendNative(0xCD.toByte(), createNdefFileBody)
@@ -539,7 +539,7 @@ class NDEFHelper private constructor(
             cc[11] = maxNdefLenHi
             cc[12] = maxNdefLenLo
             cc[13] = 0x00                // read access
-            cc[14] = 0x00                // write access
+            cc[14] = 0xFF.toByte()                // write access
 
             // Use our existing StandardFile writer (by fileNo)
             val ccOk = writeStandardFileInCurrentApp(0x01, cc)

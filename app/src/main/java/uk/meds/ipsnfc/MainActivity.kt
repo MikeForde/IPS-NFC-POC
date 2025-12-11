@@ -16,7 +16,7 @@ import android.nfc.NdefRecord
 
 class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
-    private enum class PendingAction { NONE, WRITE, READ, FORMAT, WRITE_DUAL_NDEF, FORMAT_FOR_NDEF, READ_DUAL_NDEF }
+    private enum class PendingAction { NONE, WRITE, READ, FORMAT, WRITE_DUAL_NDEF, FORMAT_FOR_NDEF, READ_DUAL_NDEF, WRITE_NATO, READ_NATO, FORMAT_NATO }
 
     private var nfcAdapter: NfcAdapter? = null
     private var pendingAction: PendingAction = PendingAction.NONE
@@ -30,6 +30,9 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private lateinit var buttonWriteDualNdef: Button
     private lateinit var buttonFormatForNDEF:Button
     private lateinit var buttonReadDual:Button
+    private lateinit var buttonWriteNato:Button
+    private lateinit var buttonReadNato:Button
+    private lateinit var buttonFormatForNATO:Button
 
 
     // For now, dummy payloads. Later these will be gzip’d IPS historic/new data.
@@ -64,7 +67,9 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         buttonWriteDualNdef = findViewById(R.id.buttonWriteDualNdef)
         buttonFormatForNDEF = findViewById(R.id.buttonFormatForNDEF)
         buttonReadDual = findViewById(R.id.buttonReadDual)
-
+        buttonWriteNato = findViewById(R.id.buttonWriteNato)
+        buttonReadNato = findViewById(R.id.buttonReadNato)
+        buttonFormatForNATO = findViewById(R.id.buttonFormatForNATO)
 
         nfcAdapter = NfcAdapter.getDefaultAdapter(this)
         if (nfcAdapter == null) {
@@ -106,6 +111,24 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             if (nfcAdapter == null) return@setOnClickListener
             pendingAction = PendingAction.READ_DUAL_NDEF
             statusText.text = "READ NDEF dual mode: tap DESFire card\n(This will READ NDEF + DES)"
+        }
+
+        buttonWriteNato.setOnClickListener {
+            if (nfcAdapter == null) return@setOnClickListener
+            pendingAction = PendingAction.WRITE_NATO
+            statusText.text = "WRITE NATO mode: tap DESFire card\n(This will WRITE NATO NDEF)"
+        }
+
+        buttonReadNato.setOnClickListener {
+            if (nfcAdapter == null) return@setOnClickListener
+            pendingAction = PendingAction.READ_NATO
+            statusText.text = "READ NATO mode: tap DESFire card\n(This will READ NATO NDEF)"
+        }
+
+        buttonFormatForNATO.setOnClickListener {
+            if (nfcAdapter == null) return@setOnClickListener
+            pendingAction = PendingAction.FORMAT_NATO
+            statusText.text = "FORMAT for NATO mode: tap DESFire card\n(This will FORMAT for NATO NDEF)"
         }
     }
 
@@ -184,6 +207,43 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             return
         }
 
+        // 🔹 Special case: NATO layout (000001 with two NDEF files) uses NATOHelper
+        if (currentAction == PendingAction.WRITE_NATO) {
+            try {
+                handleWriteNato(tag)   // this should call NATOHelper.connect(...)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                runOnUiThread {
+                    statusText.text = "Error: ${e.message}"
+                }
+            }
+            return
+        }
+
+        if (currentAction == PendingAction.READ_NATO) {
+            try {
+                handleReadNato(tag)    // this should call NATOHelper.connect(...)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                runOnUiThread {
+                    statusText.text = "Error: ${e.message}"
+                }
+            }
+            return
+        }
+
+        if (currentAction == PendingAction.FORMAT_NATO) {
+            try {
+                handleFormatForNato(tag)    // this should call NATOHelper.connect(...)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                runOnUiThread {
+                    statusText.text = "Error: ${e.message}"
+                }
+            }
+            return
+        }
+
         // 🔹 All other actions use DesfireHelper as before
         val helper = DesfireHelper.connect(tag, debug = true)
         if (helper == null) {
@@ -206,6 +266,9 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 PendingAction.WRITE_DUAL_NDEF -> Unit
                 PendingAction.FORMAT_FOR_NDEF -> Unit
                 PendingAction.READ_DUAL_NDEF -> Unit
+                PendingAction.WRITE_NATO -> Unit
+                PendingAction.READ_NATO -> Unit
+                PendingAction.FORMAT_NATO -> Unit
                 PendingAction.NONE  -> Unit
                 // 🚫 no WRITE_DUAL_NDEF here anymore
             }
@@ -218,6 +281,75 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             helper.close()
         }
     }
+
+    private fun handleFormatForNato(tag: Tag) {
+        // Use whatever is in the Historic box as the seed NPS payload,
+        // or fall back to a sensible default if blank.
+        val npsSeed = textHistoric.text.toString()
+            .ifBlank { """{"type":"nps-seed","msg":"Initial NATO NPS"}""" }
+            .toByteArray()
+
+        val ok = NATOHelper.formatPiccForNatoNdef(
+            tag = tag,
+            debug = true,
+            seedNpsMimeType = "application/x.nps.v1-0",
+            seedNpsPayload = npsSeed,
+            npsCapacityBytes = 2048,
+            extraCapacityBytes = 2048
+        )
+
+        runOnUiThread {
+            statusText.text = if (ok) "NATO format OK" else "NATO format FAILED"
+            pendingAction = PendingAction.NONE
+        }
+    }
+
+
+    private fun handleWriteNato(tag: Tag) {
+        val helper = NATOHelper.connect(tag, debug = true) ?: run {
+            runOnUiThread { statusText.text = "NATO write: connect failed" }
+            return
+        }
+
+        try {
+            val ok = helper.writeNatoPayloads(
+                npsMimeType = "application/x.nps.v1-0",
+                npsPayload = textHistoric.text.toString().toByteArray(),
+                extraMimeType = "application/x.ext.v1-0",
+                extraPayload = textRw.text.toString().toByteArray()
+            )
+            runOnUiThread {
+                statusText.text = if (ok) "NATO write OK" else "NATO write FAILED"
+                pendingAction = PendingAction.NONE
+            }
+        } finally {
+            helper.close()
+        }
+    }
+
+    private fun handleReadNato(tag: Tag) {
+        val helper = NATOHelper.connect(tag, debug = true) ?: run {
+            runOnUiThread { statusText.text = "NATO read: connect failed" }
+            return
+        }
+
+        try {
+            val payload = helper.readNatoPayloads()
+            runOnUiThread {
+                if (payload == null) {
+                    statusText.text = "NATO read FAILED or not NATO layout"
+                } else {
+                    textHistoric.setText(payload.npsPayload.toString(Charsets.UTF_8))
+                    textRw.setText(payload.extraPayload.toString(Charsets.UTF_8))
+                    statusText.text = "NATO read OK"
+                }
+                pendingAction = PendingAction.NONE
+            }
+        } finally {
+            helper.close()
+        }
+    }
+
 
     private fun handleReadDualNdef(tag: Tag) {
         var historicText: String? = null
