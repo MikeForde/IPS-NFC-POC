@@ -109,60 +109,47 @@ A Settings button (⚙️) allows switching between backends at runtime.
 
 - Status bar showing operation results and card info
 
-# NFC Card Requirements
+## NFC Card Requirements
 
-MIFARE DESFire EV1 / EV2 / EV3
+- MIFARE DESFire EV1 / EV2 / EV3
 
-8KB or 16KB variants recommended
+- 8KB or 16KB variants recommended
 
-Android device with NFC and IsoDep support
+- Android device with NFC and IsoDep support
 
-# Technical Highlights
-DESFire Details
+## Technical Highlights
+### DESFire Details
 
-Uses IsoDep + native DESFire commands
+- Uses IsoDep + native DESFire commands
+- Explicit creation of:
+   - Applications
+   - Standard data files
+   - ISO file IDs (E103, E104, E105)
+- File sizes are validated before write
+  - Writes fail cleanly if data exceeds capacity
+- Read-only enforced via DESFire access rights
 
-Explicit creation of:
+### NDEF Handling
+- Manual construction of NDEF records
+- Supports short and long records
+- Correct handling of:
+  - NLEN
+  - MIME media types
+  - CC file TLVs
+- Avoids Android’s “greedy” NDEF formatting pitfalls
 
-Applications
+## Project Structure (Key Classes)
+| Class          | Purpose                                                  |
+|----------------|----------------------------------------------------------|
+| MainActivity   | UI, NFC intent handling, workflow coordination           |
+| DesfireHelper  | Pure DESFire read/write implementation                   |
+| NDEFHelper     | Dual mode (Type-4 NDEF + DESFire)                         |
+| NATOHelper     | NATO-compliant two-NDEF-file implementation               |
+| PayloadBuilder | DESFire command payload construction                     |
 
-Standard data files
-
-ISO file IDs (E103, E104, E105)
-
-File sizes are validated before write
-
-Writes fail cleanly if data exceeds capacity
-
-Read-only enforced via DESFire access rights
-
-NDEF Handling
-
-Manual construction of NDEF records
-
-Supports short and long records
-
-Correct handling of:
-
-NLEN
-
-MIME media types
-
-CC file TLVs
-
-Avoids Android’s “greedy” NDEF formatting pitfalls
-
-# Project Structure (Key Classes)
-Class	Purpose
-MainActivity	UI, NFC intent handling, workflow coordination
-DesfireHelper	Pure DESFire read/write implementation
-NDEFHelper	Dual mode (Type-4 NDEF + DESFire)
-NATOHelper	NATO-compliant two-NDEF-file implementation
-PayloadBuilder	DESFire command payload construction
-# Development & Testing Notes
-Local testing
-adb reverse tcp:5050 tcp:5050
-
+## Development & Testing Notes
+### Local testing
+<pre>adb reverse tcp:5050 tcp:5050</pre>
 
 Then select Local in the app’s Settings menu.
 
