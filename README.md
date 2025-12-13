@@ -1,5 +1,9 @@
 # NATO Patient Summary NFC Android App
 
+<p align="center">
+  <img src="NPS_POC_App.png" alt="NPS POC Android App" width="400"/>
+</p>
+
 This Android application is a demonstration and reference implementation for writing and reading NATO Patient Summary (NPS) data to MIFARE DESFire EV1/EV2/EV3 NFC cards using several interoperable approaches.
 
 It accompanies the IPS MERN WebApp and demonstrates how NATO-aligned patient summaries can be stored on NFC media in a way that balances:
