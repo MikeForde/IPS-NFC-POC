@@ -8,10 +8,20 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import android.nfc.tech.Ndef
-import android.nfc.NdefMessage
-import android.nfc.NdefRecord
+import android.widget.AdapterView
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONArray
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.lifecycle.lifecycleScope
+import android.widget.ArrayAdapter
+import android.widget.ImageButton
+import android.widget.Spinner
+import android.widget.TabHost
+
 
 
 class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
@@ -20,6 +30,50 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
     private var nfcAdapter: NfcAdapter? = null
     private var pendingAction: PendingAction = PendingAction.NONE
+
+    private val http = OkHttpClient()
+    private val httpClient = okhttp3.OkHttpClient()
+    private val gson = com.google.gson.GsonBuilder().setPrettyPrinting().create()
+
+    private data class IpsListItem(
+        val packageUUID: String,
+        val given: String,
+        val name: String
+    ) {
+        fun label(): String = "${name}, ${given}  (${packageUUID.take(8)})"
+    }
+
+    private data class SplitResponse(
+        val id: String?,
+        val cutoff: String?,
+        val protect: String?,
+        val ro: Any?,
+        val rw: Any?
+    )
+
+    private var ipsList: List<IpsListItem> = emptyList()
+    private var selectedPackageUuid: String? = null
+
+    private val PREFS = "ips_prefs"
+    private val KEY_BASE_URL = "ips_base_url"
+
+    private val BASE_LOCAL = "http://localhost:5050"
+    private val BASE_AZURE = "https://ipsmern-dep.azurewebsites.net"
+
+    private fun getIpsBase(): String {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        return prefs.getString(KEY_BASE_URL, BASE_AZURE) ?: BASE_AZURE
+    }
+
+    private fun setIpsBase(base: String) {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        prefs.edit().putString(KEY_BASE_URL, base).apply()
+    }
+
+    private fun ipsListUrl(): String = "${getIpsBase()}/ips/list"
+    private fun ipsSplitUrlBase(): String = "${getIpsBase()}/ipsunifiedsplit/"
+
+
 
     private lateinit var statusText: TextView
     private lateinit var textHistoric: EditText
@@ -58,6 +112,29 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        findViewById<ImageButton>(R.id.buttonSettings).setOnClickListener {
+            showBaseUrlChooser()
+        }
+
+        val tabHost = findViewById<TabHost>(android.R.id.tabhost)
+        tabHost.setup()
+
+        tabHost.addTab(
+            tabHost.newTabSpec("ro")
+                .setIndicator("RO (NPS)")
+                .setContent(R.id.tab_ro)
+        )
+
+        tabHost.addTab(
+            tabHost.newTabSpec("rw")
+                .setIndicator("RW (Extra)")
+                .setContent(R.id.tab_rw)
+        )
+
+// Default tab (optional)
+        tabHost.currentTab = 0
+
+
         statusText = findViewById(R.id.statusText)
         textHistoric = findViewById(R.id.textHistoric)
         textRw = findViewById(R.id.textRw)
@@ -70,6 +147,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         buttonWriteNato = findViewById(R.id.buttonWriteNato)
         buttonReadNato = findViewById(R.id.buttonReadNato)
         buttonFormatForNATO = findViewById(R.id.buttonFormatForNATO)
+        val spinner = findViewById<Spinner>(R.id.spinnerIps)
 
         nfcAdapter = NfcAdapter.getDefaultAdapter(this)
         if (nfcAdapter == null) {
@@ -130,6 +208,35 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             pendingAction = PendingAction.FORMAT_NATO
             statusText.text = "FORMAT for NATO mode: tap DESFire card\n(This will FORMAT for NATO NDEF)"
         }
+
+        spinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: android.widget.AdapterView<*>,
+                view: android.view.View,
+                position: Int,
+                id: Long
+            ) {
+                val uuid = ipsList.getOrNull(position)?.packageUUID
+                selectedPackageUuid = uuid
+
+                uuid?.let {
+                    // Optional: update status immediately
+                    statusText.text = "Fetching IPS split for: $it"
+                    fetchAndShowSplit(it)   // <-- implement / call your existing network fetch here
+                }
+            }
+
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>) {
+                selectedPackageUuid = null
+            }
+        }
+
+        findViewById<Button>(R.id.buttonRefreshIps).setOnClickListener {
+            refreshIpsList()
+        }
+
+// load once at startup
+        refreshIpsList()
     }
 
     override fun onResume() {
@@ -282,11 +389,149 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
     }
 
+    private fun showBaseUrlChooser() {
+        val options = arrayOf(
+            "Local (http://localhost:5050)",
+            "Azure (https://ipsmern-dep.azurewebsites.net)"
+        )
+
+        val current = getIpsBase()
+        val checked = when (current) {
+            BASE_AZURE -> 1
+            else -> 0
+        }
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("API base URL")
+            .setSingleChoiceItems(options, checked) { dialog, which ->
+                val chosen = if (which == 1) BASE_AZURE else BASE_LOCAL
+                setIpsBase(chosen)
+
+                statusText.text = "API base set to: $chosen"
+                dialog.dismiss()
+
+                // Immediately refresh list + auto-fetch first record (your existing flow)
+                refreshIpsList()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+
+    private fun fetchAndShowSplit(packageUUID: String) {
+        runOnUiThread {
+            statusText.text = "Fetching IPS split for $packageUUID..."
+            pendingAction = PendingAction.NONE
+        }
+
+        val url = ipsSplitUrlBase() + packageUUID
+
+        val req = okhttp3.Request.Builder()
+            .url(url)
+            .get()
+            .build()
+
+        httpClient.newCall(req).enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                runOnUiThread {
+                    statusText.text = "Fetch failed: ${e.message}"
+                }
+            }
+
+            override fun onResponse(call: okhttp3.Call, resp: okhttp3.Response) {
+                resp.use {
+                    if (!it.isSuccessful) {
+                        runOnUiThread {
+                            statusText.text = "Fetch failed: HTTP ${it.code}"
+                        }
+                        return
+                    }
+
+                    val body = it.body?.string().orEmpty()
+                    try {
+                        val split = gson.fromJson(body, SplitResponse::class.java)
+
+                        val roPretty = gson.toJson(split.ro)
+                        val rwPretty = gson.toJson(split.rw)
+
+                        runOnUiThread {
+                            textHistoric.setText(roPretty)
+                            textRw.setText(rwPretty)
+                            statusText.text = "Loaded IPS for $packageUUID"
+                        }
+                    } catch (ex: Exception) {
+                        runOnUiThread {
+                            statusText.text = "Parse failed: ${ex.message}"
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+
+    private fun refreshIpsList() {
+        statusText.text = "Loading IPS list…"
+
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    val req = Request.Builder().url(ipsListUrl()).build()
+                    http.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) {
+                            return@withContext Result.failure(Exception("HTTP ${resp.code}"))
+                        }
+                        val body = resp.body?.string() ?: "[]"
+                        val arr = JSONArray(body)
+
+                        val items = mutableListOf<IpsListItem>()
+                        for (i in 0 until arr.length()) {
+                            val o = arr.getJSONObject(i)
+                            items.add(
+                                IpsListItem(
+                                    packageUUID = o.optString("packageUUID", ""),
+                                    given = o.optString("given", ""),
+                                    name = o.optString("name", "")
+                                )
+                            )
+                        }
+                        Result.success(items.toList())
+                    }
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            }
+
+            runOnUiThread {
+                result.fold(
+                    onSuccess = { items ->
+                        ipsList = items
+                        val spinner = findViewById<Spinner>(R.id.spinnerIps)
+                        val labels = items.map { it.label() }.ifEmpty { listOf("(no records)") }
+
+                        spinner.adapter = ArrayAdapter(
+                            this@MainActivity,
+                            android.R.layout.simple_spinner_dropdown_item,
+                            labels
+                        )
+
+                        // Default selection
+                        selectedPackageUuid = items.firstOrNull()?.packageUUID
+                        statusText.text = "IPS list loaded (${items.size})"
+                    },
+                    onFailure = { e ->
+                        statusText.text = "Failed to load IPS list: ${e.message}"
+                    }
+                )
+            }
+        }
+    }
+
+
     private fun handleFormatForNato(tag: Tag) {
         // Use whatever is in the Historic box as the seed NPS payload,
         // or fall back to a sensible default if blank.
-        val npsSeed = textHistoric.text.toString()
-            .ifBlank { """{"type":"nps-seed","msg":"Initial NATO NPS"}""" }
+        val npsSeed =  """{"type":"nps-seed","msg":"Initial NATO NPS"}"""
             .toByteArray()
 
         val ok = NATOHelper.formatPiccForNatoNdef(
@@ -456,22 +701,84 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 """{"type":"rw","msg":"Default RW extra data"}"""
             }
 
+            val npsBytes = npsText.toByteArray(Charsets.UTF_8)
+            val rwBytes  = rwText.toByteArray(Charsets.UTF_8)
+
+            // If RO part doesn't fit current 000001/E104 capacity, reformat PICC for Dual
+            val roFits = helper.canWriteType4NdefRo("application/x.nps.v1-0", npsBytes)
+            if (!roFits) {
+                val requiredCapacity = helper.requiredType4Capacity("application/x.nps.v1-0", npsBytes)
+
+                // pick a practical capacity (aligned + headroom)
+                val newCapacity = helper.chooseNdefCapacity(requiredCapacity)
+
+                helper.close() // must close before reformat (new IsoDep session)
+
+                val formatted = NDEFHelper.formatPiccForDualNdef(
+                    tag = tag,
+                    debug = true,
+                    seedMimeType = "application/x.nps.v1-0",
+                    seedPayload = """{"type":"seed","msg":"Dual reformat"}""".toByteArray(),
+                    ndefCapacityBytes = newCapacity
+                )
+
+                if (!formatted) {
+                    runOnUiThread {
+                        statusText.text = "Dual write FAILED: could not reformat card for larger RO NDEF"
+                        pendingAction = PendingAction.NONE
+                    }
+                    return
+                }
+
+                // reconnect after format
+                val helper2 = NDEFHelper.connect(tag, debug = true)
+                if (helper2 == null) {
+                    runOnUiThread {
+                        statusText.text = "Dual write FAILED: reconnect after reformat failed"
+                        pendingAction = PendingAction.NONE
+                    }
+                    return
+                }
+
+                try {
+                    val ok = helper2.writeDualSectionNdef(
+                        roMimeType = "application/x.nps.v1-0",
+                        roPayload  = npsBytes,
+                        rwMimeType = "application/x.ext.v1-0",
+                        rwPayload  = rwBytes
+                    )
+
+                    runOnUiThread {
+                        statusText.text = if (ok) {
+                            "Dual write OK (auto-resized RO NDEF)"
+                        } else {
+                            "Dual write FAILED"
+                        }
+                        pendingAction = PendingAction.NONE
+                    }
+                } finally {
+                    helper2.close()
+                }
+                return
+            }
+
+            // Normal path (fits)
             val ok = helper.writeDualSectionNdef(
                 roMimeType = "application/x.nps.v1-0",
-                roPayload = npsText.toByteArray(Charsets.UTF_8),
+                roPayload  = npsBytes,
                 rwMimeType = "application/x.ext.v1-0",
-                rwPayload = rwText.toByteArray(Charsets.UTF_8)
+                rwPayload  = rwBytes
             )
 
             runOnUiThread {
-                if (ok) {
-                    statusText.text = "Dual write OK: Type-4 NDEF (RO) + DESFire extra (RW)"
-                    Toast.makeText(this, "Wrote RO NPS + RW extra", Toast.LENGTH_SHORT).show()
+                statusText.text = if (ok) {
+                    "Dual write OK: Type-4 NDEF (RO) + DESFire extra (RW)"
                 } else {
-                    statusText.text = "Dual write FAILED (DESFire)"
+                    "Dual write FAILED"
                 }
                 pendingAction = PendingAction.NONE
             }
+
         } catch (e: Exception) {
             e.printStackTrace()
             runOnUiThread {
@@ -479,9 +786,11 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 pendingAction = PendingAction.NONE
             }
         } finally {
+            // note: may already be closed earlier in the resize path; safe anyway
             helper.close()
         }
     }
+
 
 
 

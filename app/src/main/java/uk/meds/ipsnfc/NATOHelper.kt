@@ -50,6 +50,7 @@ class NATOHelper private constructor(
     // Public high-level API
     // -------------------------------------------------------------------------
 
+
     /**
      * Write BOTH NPS (RO) and EXTRA (RW) payloads into the NATO layout.
      *
@@ -62,21 +63,29 @@ class NATOHelper private constructor(
         extraPayload: ByteArray
     ): Boolean {
         return try {
+            // Calculate how many bytes we actually need in each file
+            val npsNeed   = roundUp(requiredType4FileBytes(npsMimeType, npsPayload) + 16, 64)
+            val extraNeed = roundUp(requiredType4FileBytes(extraMimeType, extraPayload) + 16, 64)
+
+            // Ensure NATO NDEF app exists and files are big enough (may reformat if needed)
+            if (!ensureNatoCapacities(npsNeed, extraNeed)) {
+                Log.e(TAG, "writeNatoPayloads: ensureNatoCapacities failed")
+                return false
+            }
+
             // Select NATO NDEF app (000001)
             if (!desfire.selectApplication(NDEF_APP_AID)) {
                 Log.e(TAG, "writeNatoPayloads: failed to select NDEF app (000001)")
                 return false
             }
 
-            // NPS is supposed to be write-protected in final state; for now we
-            // rely on app master key 0x00..00 to (re)write for testing.
+            // Write NPS and EXTRA (writeNdefFileInCurrentApp checks size again)
             val npsOk = writeNdefFileInCurrentApp(FILE_NPS, npsMimeType, npsPayload)
             if (!npsOk) {
                 Log.e(TAG, "writeNatoPayloads: failed to write NPS file")
                 return false
             }
 
-            // EXTRA is RW; same mechanism, different file number
             val extraOk = writeNdefFileInCurrentApp(FILE_EXTRA, extraMimeType, extraPayload)
             if (!extraOk) {
                 Log.e(TAG, "writeNatoPayloads: failed to write EXTRA file")
@@ -128,6 +137,69 @@ class NATOHelper private constructor(
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
+    private fun ensureNatoCapacities(npsCapacityBytes: Int, extraCapacityBytes: Int): Boolean {
+        // Try to inspect current layout; if missing or too small -> do destructive rebuild
+        return try {
+            if (!desfire.selectApplication(NDEF_APP_AID)) {
+                Log.w(TAG, "ensureNatoCapacities: NDEF app not present, creating fresh NATO layout")
+                return lowLevelFormatPiccForNatoNdef(
+                    seedNpsMimeType = "application/x.nps.v1-0",
+                    seedNpsPayload = """{"type":"nps-seed","msg":"seed"}""".toByteArray(),
+                    npsCapacityBytes = npsCapacityBytes,
+                    extraCapacityBytes = extraCapacityBytes
+                )
+            }
+
+            val fsNps = desfire.getFileSettings(FILE_NPS.toInt()) as? StandardDesfireFile
+            val fsExtra = desfire.getFileSettings(FILE_EXTRA.toInt()) as? StandardDesfireFile
+
+            if (fsNps == null || fsExtra == null) {
+                Log.w(TAG, "ensureNatoCapacities: files missing, rebuilding NATO layout")
+                return lowLevelFormatPiccForNatoNdef(
+                    seedNpsMimeType = "application/x.nps.v1-0",
+                    seedNpsPayload = """{"type":"nps-seed","msg":"seed"}""".toByteArray(),
+                    npsCapacityBytes = npsCapacityBytes,
+                    extraCapacityBytes = extraCapacityBytes
+                )
+            }
+
+            val curNps = fsNps.fileSize
+            val curExtra = fsExtra.fileSize
+
+            val needRebuild = (curNps < npsCapacityBytes) || (curExtra < extraCapacityBytes)
+            if (!needRebuild) {
+                Log.d(TAG, "ensureNatoCapacities: OK (NPS=$curNps, EXTRA=$curExtra)")
+                return true
+            }
+
+            Log.w(
+                TAG,
+                "ensureNatoCapacities: too small (NPS=$curNps need=$npsCapacityBytes, EXTRA=$curExtra need=$extraCapacityBytes) -> rebuilding"
+            )
+
+            lowLevelFormatPiccForNatoNdef(
+                seedNpsMimeType = "application/x.nps.v1-0",
+                seedNpsPayload = """{"type":"nps-seed","msg":"seed"}""".toByteArray(),
+                npsCapacityBytes = npsCapacityBytes,
+                extraCapacityBytes = extraCapacityBytes
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "ensureNatoCapacities failed", e)
+            false
+        }
+    }
+
+
+    private fun requiredType4FileBytes(mimeType: String, payload: ByteArray): Int {
+        val record = buildMimeNdefRecord(mimeType, payload)
+        return 2 + record.size // NLEN(2) + NDEF record bytes
+    }
+
+    // nice-to-have: round up so we don’t reformat on tiny growth
+    private fun roundUp(value: Int, step: Int): Int {
+        if (step <= 0) return value
+        return ((value + step - 1) / step) * step
+    }
 
     /**
      * Format PICC and build full NATO layout using native commands:

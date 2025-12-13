@@ -98,26 +98,26 @@ class NDEFHelper private constructor(
      *    and then writes a single NDEF MIME record into that file.
      */
     fun writeDualSectionNdef(
-        roMimeType: String,      // NPS MIME
-        roPayload: ByteArray,    // NPS JSON
-        rwMimeType: String,      // Extra MIME
-        rwPayload: ByteArray     // Extra JSON
+        roMimeType: String,
+        roPayload: ByteArray,
+        rwMimeType: String,
+        rwPayload: ByteArray
     ): Boolean {
         return try {
-            // 1) Write the RO NPS into the Type-4 NDEF file in 000001
+            // 1) RO NPS into Type-4 NDEF file in 000001
             val npsOk = writeType4NdefRo(roMimeType, roPayload)
             if (!npsOk) {
                 Log.e(TAG, "writeDualSectionNdef: failed to write RO NPS into Type-4 NDEF file")
                 return false
             }
 
-            // 2) Prepare RW extra as NDEF MIME record for our private DESFire app
+            // 2) Extra into private app 665544 (as NDEF MIME record)
             val extraNdef = buildMimeNdefRecord(rwMimeType, rwPayload)
 
-            // Small safety margin so we don't recreate the file on every minor growth
-            val extraSize = max(extraNdef.size + 16, MIN_EXTRA_FILE_SIZE)
+            // We store the record bytes directly in the file
+            val desiredExtraFileSize = chooseExtraFileSize(extraNdef.size)
 
-            if (!ensureIpsAppAndExtraFile(extraSize)) {
+            if (!ensureIpsAppAndExtraFile(desiredExtraFileSize)) {
                 Log.e(TAG, "writeDualSectionNdef: ensureIpsAppAndExtraFile failed")
                 return false
             }
@@ -132,7 +132,13 @@ class NDEFHelper private constructor(
         }
     }
 
-
+    private fun chooseExtraFileSize(requiredBytes: Int): Int {
+        val headroom = 64
+        val minSize  = MIN_EXTRA_FILE_SIZE
+        val align    = 32
+        val base = max(minSize, requiredBytes + headroom)
+        return ((base + (align - 1)) / align) * align
+    }
 
     /**
      * Ensure our IPS application and the two standard data files exist.
@@ -146,18 +152,13 @@ class NDEFHelper private constructor(
     @Synchronized
     private fun ensureIpsAppAndExtraFile(extraSize: Int): Boolean {
         try {
-            // 1) Go to PICC / master application (00 00 00)
             desfire.selectApplication(MASTER_AID)
 
-            // 2) Check if IPS app already exists
             val apps = runCatching { desfire.applicationsIds }.getOrNull()
             val appExists = apps?.any { it.id contentEquals IPS_AID } == true
 
             if (!appExists) {
-                // Try PICC master auth (default 00..00, key #0) – ignore failure
-                runCatching {
-                    desfire.authenticate(DEFAULT_DES_KEY, KEYNO_MASTER, KeyType.DES)
-                }
+                runCatching { desfire.authenticate(DEFAULT_DES_KEY, KEYNO_MASTER, KeyType.DES) }
 
                 val created = desfire.createApplication(
                     IPS_AID,
@@ -165,32 +166,19 @@ class NDEFHelper private constructor(
                     KeyType.DES,
                     APPLICATION_KEY_COUNT
                 )
-                Log.d(
-                    TAG,
-                    "NDEFHelper: createApplication(IPS_AID) -> $created " +
-                            "code=${desfire.code.toString(16)} desc=${desfire.codeDesc}"
-                )
+                Log.d(TAG, "NDEFHelper: createApplication(IPS_AID) -> $created code=${desfire.code.toString(16)} desc=${desfire.codeDesc}")
 
-                // Fail only if it's not the “no changes / already exists” scenario
                 if (!created && desfire.code != 0xDE) {
-                    Log.e(
-                        TAG,
-                        "NDEFHelper: failed to create IPS app, " +
-                                "code=${desfire.code.toString(16)} desc=${desfire.codeDesc}"
-                    )
+                    Log.e(TAG, "NDEFHelper: failed to create IPS app code=${desfire.code.toString(16)} desc=${desfire.codeDesc}")
                     return false
                 }
-            } else {
-                Log.d(TAG, "NDEFHelper: IPS_AID already exists")
             }
 
-            // 3) Select our IPS app
             if (!desfire.selectApplication(IPS_AID)) {
                 Log.e(TAG, "NDEFHelper: failed to select IPS AID")
                 return false
             }
 
-            // 4) See if FILE_EXTRA already exists
             val fileIds = runCatching { desfire.fileIds }.getOrElse {
                 Log.e(TAG, "NDEFHelper: getFileIds failed", it)
                 ByteArray(0)
@@ -198,22 +186,33 @@ class NDEFHelper private constructor(
 
             val haveExtra = fileIds.any { it == FILE_EXTRA }
 
-            if (haveExtra) {
-                Log.d(TAG, "NDEFHelper: FILE_EXTRA already exists")
-                return true
-            }
-
-            // 5) Authenticate with app master key (key 0, 00..00) to create files
+            // We need app master auth to create OR delete/recreate
             val appAuthOk = desfire.authenticate(DEFAULT_DES_KEY, KEYNO_MASTER, KeyType.DES)
             if (!appAuthOk) {
                 Log.e(TAG, "NDEFHelper: app master key auth failed")
                 return false
             }
 
-            val pb = PayloadBuilder()
-            val extraFileSize = max(extraSize, MIN_EXTRA_FILE_SIZE)
+            val desired = max(extraSize, MIN_EXTRA_FILE_SIZE)
 
-            // RW file: free read AND free write
+            if (haveExtra) {
+                val fs = desfire.getFileSettings(FILE_EXTRA.toInt()) as? StandardDesfireFile
+                val current = fs?.fileSize ?: 0
+
+                if (current >= desired) {
+                    Log.d(TAG, "NDEFHelper: FILE_EXTRA exists size=$current (ok)")
+                    return true
+                }
+
+                Log.w(TAG, "NDEFHelper: FILE_EXTRA too small ($current). Recreating to $desired.")
+
+                val deleted = runCatching { desfire.deleteFile(FILE_EXTRA) }.getOrElse { false }
+                Log.d(TAG, "NDEFHelper: deleteFile(FILE_EXTRA) -> $deleted code=${desfire.code.toString(16)} desc=${desfire.codeDesc}")
+                if (!deleted) return false
+            }
+
+            // Create (or recreate) EXTRA as RW (free read/write)
+            val pb = PayloadBuilder()
             val extraPayload = pb.createStandardFile(
                 FILE_EXTRA.toInt(),
                 PayloadBuilder.CommunicationSetting.Plain,
@@ -221,31 +220,23 @@ class NDEFHelper private constructor(
                 keyCar = KEYNO_CAR.toInt(),
                 keyR = 0xE,  // free read
                 keyW = 0xE,  // free write
-                fileSize = extraFileSize
+                fileSize = desired
             ) ?: throw RuntimeException("NDEFHelper: createStandardFile(EXTRA) returned null")
 
             val createdExtra = desfire.createStdDataFile(extraPayload)
-            Log.d(
-                TAG,
-                "NDEFHelper: createStdDataFile(EXTRA) -> $createdExtra " +
-                        "code=${desfire.code.toString(16)} desc=${desfire.codeDesc}"
-            )
+            Log.d(TAG, "NDEFHelper: createStdDataFile(EXTRA) -> $createdExtra code=${desfire.code.toString(16)} desc=${desfire.codeDesc}")
 
             if (!createdExtra) {
-                Log.e(
-                    TAG,
-                    "NDEFHelper: failed to create EXTRA file. " +
-                            "code=${desfire.code.toString(16)} desc=${desfire.codeDesc}"
-                )
+                Log.e(TAG, "NDEFHelper: failed to create EXTRA file code=${desfire.code.toString(16)} desc=${desfire.codeDesc}")
                 return false
             }
-
-            return true
         } catch (e: Exception) {
             Log.e(TAG, "NDEFHelper: ensureIpsAppAndExtraFile failed", e)
             return false
         }
+        return true
     }
+
 
     /**
      * Internal: write a whole Standard Data File from offset 0.
@@ -275,31 +266,29 @@ class NDEFHelper private constructor(
                 }
 
             val fileSize = fs.fileSize
+            if (data.size > fileSize) {
+                Log.e(TAG, "writeStandardFileInternal($fileNo): payload ${data.size} > fileSize $fileSize (REFUSING to truncate)")
+                return false
+            }
+
             val fullData = ByteArray(fileSize)
-            val len = min(fileSize, data.size)
-            System.arraycopy(data, 0, fullData, 0, len)
+            System.arraycopy(data, 0, fullData, 0, data.size)
 
             val pb = PayloadBuilder()
-            val payload = pb.writeToStandardFile(fileNo.toInt(), fullData)
+            val payloadApdu = pb.writeToStandardFile(fileNo.toInt(), fullData)
                 ?: throw RuntimeException("writeToStandardFile($fileNo) returned null")
 
-            Log.d(
-                TAG,
-                "writeStandardFileInternal($fileNo): fileSize=$fileSize, payloadLen=${payload.size}"
-            )
+            Log.d(TAG, "writeStandardFileInternal($fileNo): fileSize=$fileSize, payloadLen=${payloadApdu.size}")
 
-            val ok = desfire.writeData(payload)
-            Log.d(
-                TAG,
-                "writeStandardFileInternal($fileNo) -> $ok " +
-                        "code=${desfire.code.toString(16)} desc=${desfire.codeDesc}"
-            )
+            val ok = desfire.writeData(payloadApdu)
+            Log.d(TAG, "writeStandardFileInternal($fileNo) -> $ok code=${desfire.code.toString(16)} desc=${desfire.codeDesc}")
             ok
         } catch (e: Exception) {
             Log.e(TAG, "writeStandardFileInternal($fileNo) failed", e)
             false
         }
     }
+
 
     /**
      * Write a single-message NDEF MIME record into the standard Type-4
@@ -683,6 +672,37 @@ class NDEFHelper private constructor(
         return resp
     }
 
+    fun requiredType4Capacity(mimeType: String, payload: ByteArray): Int {
+        val record = buildMimeNdefRecord(mimeType, payload)
+        val nlenPlusMsg = 2 + record.size
+        return nlenPlusMsg
+    }
+
+    /** Pick a decent NDEF file size (E104 capacity) with headroom + alignment. */
+    fun chooseNdefCapacity(requiredBytes: Int): Int {
+        val headroom = 128
+        val minSize  = 512
+        val align    = 32
+        val base = max(minSize, requiredBytes + headroom)
+        return ((base + (align - 1)) / align) * align
+    }
+
+    /** Quick check without writing: does RO message fit in current E104 capacity? */
+    fun canWriteType4NdefRo(mimeType: String, payload: ByteArray): Boolean {
+        return try {
+            if (!desfire.selectApplication(NDEF_APP_AID)) return false
+            val appAuthOk = desfire.authenticate(DEFAULT_DES_KEY, KEYNO_MASTER, KeyType.DES)
+            if (!appAuthOk) return false
+
+            val fs = desfire.getFileSettings(FILE_NDEF.toInt()) as? StandardDesfireFile ?: return false
+            val capacity = fs.fileSize
+            val required = requiredType4Capacity(mimeType, payload)
+            required <= capacity
+        } catch (_: Exception) {
+            false
+        }
+    }
+
 
     companion object {
         private const val TAG = "NDEFHelper"
@@ -712,34 +732,66 @@ class NDEFHelper private constructor(
         private const val MIN_EXTRA_FILE_SIZE = 256
 
         /**
-         * Build a single NDEF MIME record as a Short Record (SR=1).
-         * TNF = 0x02 (media-type).
+         * Build a single-record NDEF message with TNF=Media-type (0x02) containing:
+         *  - Type: mimeType (US-ASCII)
+         *  - Payload: payload (raw bytes)
          *
-         * For now, we require payload < 256 bytes.
+         * Produces:
+         *  - SR=1 (1-byte payload length) if payload < 256
+         *  - SR=0 (4-byte payload length) otherwise
+         *
+         * No ID field (IL=0).
          */
         fun buildMimeNdefRecord(mimeType: String, payload: ByteArray): ByteArray {
             val typeBytes = mimeType.toByteArray(Charsets.US_ASCII)
             val typeLen = typeBytes.size
             val payloadLen = payload.size
 
-            require(payloadLen < 256) {
-                "Short Record (SR) only supports payload < 256 bytes (got $payloadLen)"
+            val isShort = payloadLen < 256
+
+            // TNF for media-type
+            val tnfMedia = 0x02
+
+            // Header bits:
+            // MB=1 (0x80), ME=1 (0x40), CF=0, SR=0/1 (0x10), IL=0, TNF=0x02
+            var header = 0
+            header = header or 0x80  // MB
+            header = header or 0x40  // ME
+            if (isShort) header = header or 0x10 // SR
+            header = header or tnfMedia
+
+            val headerByte = header.toByte()
+
+            return if (isShort) {
+                // Short record:
+                // [HDR][TYPE_LEN][PAYLOAD_LEN(1)][TYPE...][PAYLOAD...]
+                val result = ByteArray(3 + typeLen + payloadLen)
+                var i = 0
+                result[i++] = headerByte
+                result[i++] = typeLen.toByte()
+                result[i++] = payloadLen.toByte()
+                System.arraycopy(typeBytes, 0, result, i, typeLen)
+                i += typeLen
+                System.arraycopy(payload, 0, result, i, payloadLen)
+                result
+            } else {
+                // Normal record:
+                // [HDR][TYPE_LEN][PAYLOAD_LEN(4)][TYPE...][PAYLOAD...]
+                val result = ByteArray(6 + typeLen + payloadLen)
+                var i = 0
+                result[i++] = headerByte
+                result[i++] = typeLen.toByte()
+                result[i++] = ((payloadLen ushr 24) and 0xFF).toByte()
+                result[i++] = ((payloadLen ushr 16) and 0xFF).toByte()
+                result[i++] = ((payloadLen ushr 8) and 0xFF).toByte()
+                result[i++] = (payloadLen and 0xFF).toByte()
+                System.arraycopy(typeBytes, 0, result, i, typeLen)
+                i += typeLen
+                System.arraycopy(payload, 0, result, i, payloadLen)
+                result
             }
-
-            // NDEF header:
-            // MB=1, ME=1, CF=0, SR=1, IL=0, TNF=0x02 (media-type)
-            val header: Byte = 0b11010010.toByte() // 0xD2
-
-            val result = ByteArray(3 + typeLen + payloadLen)
-            var i = 0
-            result[i++] = header
-            result[i++] = typeLen.toByte()
-            result[i++] = payloadLen.toByte()
-            System.arraycopy(typeBytes, 0, result, i, typeLen)
-            i += typeLen
-            System.arraycopy(payload, 0, result, i, payloadLen)
-            return result
         }
+
 
         /**
          * Connect to a DESFire EVx tag using IsoDep and wrap it for "dual section" operations.

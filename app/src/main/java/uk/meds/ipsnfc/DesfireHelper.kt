@@ -138,22 +138,21 @@ class DesfireHelper private constructor(
      * This is intended to be called from WRITE paths only.
      */
     @Synchronized
-    private fun ensureTestAppAndFiles() {
+    private fun ensureTestAppAndFiles(requiredHistBytes: Int, requiredRwBytes: Int) {
         try {
+            // Decide final target sizes (add headroom + align)
+            val targetHist = chooseFileSize(requiredHistBytes)
+            val targetRw   = chooseFileSize(requiredRwBytes)
+
             // 1) Go to PICC
             desfire.selectApplication(byteArrayOf(0x00, 0x00, 0x00))
 
-            // 2) See if our AID is already present
-            val apps = desfire.applicationsIds  // returns List<DesfireApplicationId>
+            // 2) Ensure our app exists
+            val apps = desfire.applicationsIds
             val appExists = apps?.any { it.id contentEquals IPS_AID } == true
 
             if (!appExists) {
-                // Try PICC master auth with default DES key (00..00)
-                runCatching {
-                    desfire.authenticate(DEFAULT_DES_KEY, KEYNO_MASTER, KeyType.DES)
-                }
-
-                // Create our application
+                runCatching { desfire.authenticate(DEFAULT_DES_KEY, KEYNO_MASTER, KeyType.DES) }
                 val created = desfire.createApplication(
                     IPS_AID,
                     APPLICATION_MASTER_KEY_SETTINGS,
@@ -161,9 +160,7 @@ class DesfireHelper private constructor(
                     APPLICATION_KEY_COUNT
                 )
                 Log.d(TAG, "createApplication(IPS_AID) -> $created")
-                if (!created) {
-                    throw RuntimeException("Failed to create IPS app")
-                }
+                if (!created) throw RuntimeException("Failed to create IPS app")
             }
 
             // 3) Select our app
@@ -171,46 +168,56 @@ class DesfireHelper private constructor(
                 throw RuntimeException("Failed to select IPS AID")
             }
 
-            // 4) Check whether files 1 and 2 exist
-            val fileIds = try {
-                desfire.fileIds  // byte[]
-            } catch (e: Exception) {
-                Log.e(TAG, "getFileIds failed", e)
+            // 4) Inspect existing files (if present) and their sizes
+            val fileIds = runCatching { desfire.fileIds }.getOrElse {
+                Log.e(TAG, "getFileIds failed", it)
                 ByteArray(0)
             }
 
             val haveHist = fileIds.any { it == FILE_HIST }
             val haveRw   = fileIds.any { it == FILE_RW }
 
-            if (haveHist && haveRw) {
-                // Nothing more to do
-                return
+            val histSizeNow = if (haveHist) (desfire.getFileSettings(FILE_HIST.toInt()) as? StandardDesfireFile)?.fileSize else null
+            val rwSizeNow   = if (haveRw)   (desfire.getFileSettings(FILE_RW.toInt())   as? StandardDesfireFile)?.fileSize else null
+
+            val needResizeHist = haveHist && histSizeNow != null && histSizeNow < targetHist
+            val needResizeRw   = haveRw   && rwSizeNow   != null && rwSizeNow   < targetRw
+
+            // 5) If we need to create or resize, authenticate with app master
+            if (!haveHist || !haveRw || needResizeHist || needResizeRw) {
+                val appAuthOk = desfire.authenticate(DEFAULT_DES_KEY, KEYNO_MASTER, KeyType.DES)
+                if (!appAuthOk) throw RuntimeException("App master key auth failed")
             }
 
-            // 5) Authenticate with app master so we can create files
-            val appAuthOk = desfire.authenticate(DEFAULT_DES_KEY, KEYNO_MASTER, KeyType.DES)
-            if (!appAuthOk) {
-                throw RuntimeException("App master key auth failed")
+            // 6) Delete + recreate if too small
+            if (needResizeHist) {
+                Log.w(TAG, "HIST file too small ($histSizeNow). Recreating to $targetHist bytes.")
+                deleteFileSafe(FILE_HIST)
+            }
+            if (needResizeRw) {
+                Log.w(TAG, "RW file too small ($rwSizeNow). Recreating to $targetRw bytes.")
+                deleteFileSafe(FILE_RW)
             }
 
             val pb = PayloadBuilder()
 
-            if (!haveHist) {
+            if (!haveHist || needResizeHist) {
                 val histPayload = pb.createStandardFile(
                     FILE_HIST.toInt(),
                     PayloadBuilder.CommunicationSetting.Plain,
-                    KEYNO_RW.toInt(),   // RW key number
-                    KEYNO_CAR.toInt(),  // change access
-                    KEYNO_R.toInt(),    // read
-                    KEYNO_W.toInt(),    // write
-                    TEST_FILE_SIZE_BYTES
+                    KEYNO_RW.toInt(),
+                    KEYNO_CAR.toInt(),
+                    KEYNO_R.toInt(),
+                    KEYNO_W.toInt(),
+                    targetHist
                 ) ?: throw RuntimeException("createStandardFile(HIST) returned null")
 
                 val created = desfire.createStdDataFile(histPayload)
-                Log.d(TAG, "createStdDataFile(HIST) -> $created")
+                Log.d(TAG, "createStdDataFile(HIST) -> $created (size=$targetHist)")
+                if (!created) throw RuntimeException("Failed to create HIST file (code=${desfire.code.toString(16)} ${desfire.codeDesc})")
             }
 
-            if (!haveRw) {
+            if (!haveRw || needResizeRw) {
                 val rwPayload = pb.createStandardFile(
                     FILE_RW.toInt(),
                     PayloadBuilder.CommunicationSetting.Plain,
@@ -218,11 +225,12 @@ class DesfireHelper private constructor(
                     KEYNO_CAR.toInt(),
                     KEYNO_R.toInt(),
                     KEYNO_W.toInt(),
-                    TEST_FILE_SIZE_BYTES
+                    targetRw
                 ) ?: throw RuntimeException("createStandardFile(RW) returned null")
 
                 val created = desfire.createStdDataFile(rwPayload)
-                Log.d(TAG, "createStdDataFile(RW) -> $created")
+                Log.d(TAG, "createStdDataFile(RW) -> $created (size=$targetRw)")
+                if (!created) throw RuntimeException("Failed to create RW file (code=${desfire.code.toString(16)} ${desfire.codeDesc})")
             }
 
         } catch (e: Exception) {
@@ -231,6 +239,23 @@ class DesfireHelper private constructor(
         }
     }
 
+    private fun deleteFileSafe(fileNo: Byte) {
+        // nfcjlib has deleteFile() on DESFireEV1 in most builds; if yours differs, shout and we’ll adjust.
+        val ok = runCatching { desfire.deleteFile(fileNo) }.getOrElse { false }
+        Log.d(TAG, "deleteFile($fileNo) -> $ok (code=${desfire.code.toString(16)} ${desfire.codeDesc})")
+        if (!ok) throw RuntimeException("Failed to delete file $fileNo (code=${desfire.code.toString(16)} ${desfire.codeDesc})")
+    }
+
+    /** Choose a file size that fits payload + headroom, aligned. */
+    private fun chooseFileSize(payloadBytes: Int): Int {
+        val headroom = 64                 // small growth margin
+        val minSize  = 256                // sensible minimum
+        val align    = 32                 // align to 32 bytes
+
+        val wanted = payloadBytes + headroom
+        val base = maxOf(minSize, wanted)
+        return ((base + (align - 1)) / align) * align
+    }
 
 
     companion object {
@@ -397,7 +422,10 @@ class DesfireHelper private constructor(
      */
     fun writeTestPayload(historic: ByteArray, rw: ByteArray): Boolean {
         return try {
-            ensureTestAppAndFiles()
+            ensureTestAppAndFiles(
+                requiredHistBytes = historic.size,
+                requiredRwBytes   = rw.size
+            )
 
             // 1) Select our app
             if (!desfire.selectApplication(IPS_AID)) {
@@ -423,15 +451,18 @@ class DesfireHelper private constructor(
     }
 
     private fun writeOneStandardFile(fileNo: Byte, data: ByteArray): Boolean {
-        // Get file settings like the Java code does
         val fs = desfire.getFileSettings(fileNo.toInt()) as? StandardDesfireFile
             ?: throw RuntimeException("File $fileNo is not Standard / not found")
 
         val fileSize = fs.fileSize
-        val fullData = ByteArray(fileSize)
 
-        val len = minOf(fileSize, data.size)
-        System.arraycopy(data, 0, fullData, 0, len)
+        if (data.size > fileSize) {
+            Log.e(TAG, "writeOneStandardFile($fileNo): payload ${data.size} > fileSize $fileSize (REFUSING to truncate)")
+            return false
+        }
+
+        val fullData = ByteArray(fileSize)
+        System.arraycopy(data, 0, fullData, 0, data.size)
 
         val pb = PayloadBuilder()
         val payload = pb.writeToStandardFile(fileNo.toInt(), fullData)
@@ -443,6 +474,7 @@ class DesfireHelper private constructor(
         Log.d(TAG, "writeOneStandardFile($fileNo) -> $ok (code=${desfire.code.toString(16)}, desc=${desfire.codeDesc})")
         return ok
     }
+
 
     /**
      * Read test payload from FILE_HIST and FILE_RW in our test application.

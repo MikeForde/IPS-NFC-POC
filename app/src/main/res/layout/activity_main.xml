@@ -2,7 +2,7 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="16dp">
+    android:padding="12dp">
 
     <LinearLayout
         android:orientation="vertical"
@@ -10,20 +10,67 @@
         android:layout_height="wrap_content">
 
         <!-- Header -->
-        <TextView
+        <!-- Header row -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="NATO Patient Summary NFC Tool"
-            android:textSize="20sp"
-            android:textStyle="bold"
-            android:paddingBottom="4dp" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp">
+
+            <TextView
+                android:id="@+id/titleText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="NATO Patient Summary NFC Tool"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <ImageButton
+                android:id="@+id/buttonSettings"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:contentDescription="Settings"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:src="@android:drawable/ic_menu_manage" />
+        </LinearLayout>
+
 
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:background="@android:color/darker_gray"
             android:alpha="0.2"
-            android:layout_marginBottom="8dp" />
+            android:layout_marginBottom="4dp" />
+
+        <!-- IPS WebApp picker (compact row) -->
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@android:color/white"
+            android:elevation="2dp"
+            android:padding="2dp"
+            android:layout_marginBottom="2dp">
+
+            <Spinner
+                android:id="@+id/spinnerIps"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1" />
+
+            <Button
+                android:id="@+id/buttonRefreshIps"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="↻"
+                android:textSize="24sp"
+                android:textAllCaps="false"
+                android:paddingHorizontal="12dp" />
+        </LinearLayout>
 
         <!-- Status pill -->
         <TextView
@@ -31,159 +78,161 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Tap action, then present a DESFire EVx card"
-            android:textSize="15sp"
-            android:padding="10dp"
+            android:textSize="14sp"
+            android:padding="4dp"
             android:background="@android:color/darker_gray"
             android:textColor="@android:color/white"
-            android:layout_marginBottom="12dp" />
+            android:layout_marginBottom="6dp" />
 
         <!-- Primary actions -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Actions"
-            android:textStyle="bold"
-            android:layout_marginBottom="4dp" />
 
+        <!-- Write row -->
         <LinearLayout
             android:orientation="horizontal"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:gravity="center_horizontal"
-            android:layout_marginBottom="12dp">
+            android:layout_marginBottom="4dp">
 
-            <!-- Column 1: Pure DESFire -->
-            <LinearLayout
-                android:orientation="vertical"
+            <Button
+                android:id="@+id/buttonWrite"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:layout_marginEnd="6dp">
+                android:text="Write DES"
+                android:textAllCaps="false" />
 
-                <Button
-                    android:id="@+id/buttonWrite"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Write DES"
-                    android:textAllCaps="false"
-                    android:layout_marginBottom="4dp" />
-
-                <Button
-                    android:id="@+id/buttonRead"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Read DES"
-                    android:textAllCaps="false" />
-            </LinearLayout>
-
-            <!-- Column 2: Dual (Type4 + DESFire) -->
-            <LinearLayout
-                android:orientation="vertical"
+            <Button
+                android:id="@+id/buttonWriteDualNdef"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:layout_marginHorizontal="6dp">
+                android:text="Write Dual"
+                android:textAllCaps="false" />
 
-                <Button
-                    android:id="@+id/buttonWriteDualNdef"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Write Dual"
-                    android:textAllCaps="false"
-                    android:layout_marginBottom="4dp" />
-
-                <Button
-                    android:id="@+id/buttonReadDual"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Read Dual"
-                    android:textAllCaps="false" />
-            </LinearLayout>
-
-            <!-- Column 3: NATO (two NDEF files in 000001) -->
-            <LinearLayout
-                android:orientation="vertical"
+            <Button
+                android:id="@+id/buttonWriteNato"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:layout_marginStart="6dp">
-
-                <Button
-                    android:id="@+id/buttonWriteNato"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Write NATO"
-                    android:textAllCaps="false"
-                    android:layout_marginBottom="4dp" />
-
-                <Button
-                    android:id="@+id/buttonReadNato"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Read NATO"
-                    android:textAllCaps="false" />
-            </LinearLayout>
-
+                android:text="Write NDEF"
+                android:textAllCaps="false" />
         </LinearLayout>
 
-
-        <!-- Historic (RO) payload card -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Read-only / Historic payload"
-            android:textStyle="bold"
-            android:layout_marginBottom="4dp" />
-
+        <!-- Read row -->
         <LinearLayout
+            android:orientation="horizontal"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="8dp"
-            android:background="@android:color/white"
-            android:elevation="2dp"
-            android:layout_marginBottom="12dp">
+            android:layout_marginBottom="8dp">
 
-            <EditText
-                android:id="@+id/textHistoric"
-                android:layout_width="match_parent"
-                android:layout_height="120dp"
-                android:inputType="textMultiLine"
-                android:gravity="top|start"
-                android:overScrollMode="always"
-                android:scrollbars="vertical"
-                android:padding="8dp"
-                android:hint="JSON or text for NATO Patient Summary (read-only section)" />
+            <Button
+                android:id="@+id/buttonRead"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Read DES"
+                android:textAllCaps="false" />
+
+            <Button
+                android:id="@+id/buttonReadDual"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Read Dual"
+                android:textAllCaps="false" />
+
+            <Button
+                android:id="@+id/buttonReadNato"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Read NDEF"
+                android:textAllCaps="false" />
         </LinearLayout>
 
-        <!-- RW payload card -->
-        <TextView
+        <!-- RO/RW tabs -->
+        <TabHost
+            android:id="@android:id/tabhost"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Read/Write payload"
-            android:textStyle="bold"
-            android:layout_marginBottom="4dp" />
+            android:layout_marginBottom="6dp">
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="8dp"
-            android:background="@android:color/white"
-            android:elevation="2dp"
-            android:layout_marginBottom="16dp">
-
-            <EditText
-                android:id="@+id/textRw"
+            <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="120dp"
-                android:inputType="textMultiLine"
-                android:gravity="top|start"
-                android:overScrollMode="always"
-                android:scrollbars="vertical"
-                android:padding="8dp"
-                android:hint="JSON or text for extra data (read/write section)" />
-        </LinearLayout>
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TabWidget
+                    android:id="@android:id/tabs"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <FrameLayout
+                    android:id="@android:id/tabcontent"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="8dp">
+
+                    <!-- RO tab content -->
+                    <LinearLayout
+                        android:id="@+id/tab_ro"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="8dp"
+                        android:background="@android:color/white"
+                        android:elevation="2dp">
+
+                        <EditText
+                            android:id="@+id/textHistoric"
+                            android:layout_width="match_parent"
+                            android:layout_height="260dp"
+                            android:inputType="textMultiLine|textNoSuggestions"
+                            android:gravity="top|start"
+                            android:overScrollMode="always"
+                            android:scrollbars="vertical"
+                            android:padding="8dp"
+                            android:hint="NATO Patient Summary (read-only)"
+
+                            android:textSize="12sp"
+                            android:typeface="monospace"
+                            android:lineSpacingExtra="2dp"
+                            android:nestedScrollingEnabled="true"
+                            android:scrollbarStyle="insideOverlay"/>
+                    </LinearLayout>
+
+                    <!-- RW tab content -->
+                    <LinearLayout
+                        android:id="@+id/tab_rw"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="8dp"
+                        android:background="@android:color/white"
+                        android:elevation="2dp">
+
+                        <EditText
+                            android:id="@+id/textRw"
+                            android:layout_width="match_parent"
+                            android:layout_height="260dp"
+                            android:inputType="textMultiLine|textNoSuggestions"
+                            android:gravity="top|start"
+                            android:overScrollMode="always"
+                            android:scrollbars="vertical"
+                            android:padding="8dp"
+                            android:hint="Extra data (read/write)"
+
+                            android:textSize="12sp"
+                            android:typeface="monospace"
+                            android:lineSpacingExtra="2dp"
+                            android:nestedScrollingEnabled="true"
+                            android:scrollbarStyle="insideOverlay"/>
+                    </LinearLayout>
+
+                </FrameLayout>
+            </LinearLayout>
+        </TabHost>
+
 
         <!-- Maintenance / Danger zone -->
         <TextView
@@ -191,22 +240,15 @@
             android:layout_height="wrap_content"
             android:text="Format Buttons"
             android:textStyle="bold"
-            android:layout_marginBottom="4dp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Use with care – these operations will erase cards."
-            android:textSize="12sp"
             android:textColor="@android:color/holo_red_dark"
-            android:layout_marginBottom="4dp" />
+            android:layout_marginBottom="2dp" />
 
         <LinearLayout
             android:orientation="horizontal"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_horizontal"
-            android:layout_marginBottom="12dp">
+            android:layout_marginBottom="8dp">
 
             <Button
                 android:id="@+id/buttonFormatApp"
@@ -215,7 +257,6 @@
                 android:layout_weight="1"
                 android:text="DES"
                 android:textAllCaps="false"
-                android:layout_marginEnd="6dp"
                 android:textColor="@android:color/holo_red_dark" />
 
             <Button
@@ -225,7 +266,6 @@
                 android:layout_weight="1"
                 android:text="Dual"
                 android:textAllCaps="false"
-                android:layout_marginStart="6dp"
                 android:textColor="@android:color/holo_red_dark" />
 
             <Button
@@ -233,9 +273,8 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="NATO"
+                android:text="NDEF"
                 android:textAllCaps="false"
-                android:layout_marginStart="6dp"
                 android:textColor="@android:color/holo_red_dark" />
         </LinearLayout>
 
