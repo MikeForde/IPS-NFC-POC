@@ -1,4 +1,4 @@
-NATO Patient Summary NFC Android App
+# NATO Patient Summary NFC Android App
 
 This Android application is a demonstration and reference implementation for writing and reading NATO Patient Summary (NPS) data to MIFARE DESFire EV1/EV2/EV3 NFC cards using several interoperable approaches.
 
@@ -12,7 +12,7 @@ DESFire-grade security and structure
 
 Offline usability
 
-Key Features
+# Key Features
 🔹 Three NFC Storage Modes
 
 The app supports three distinct NFC layouts, selectable from the UI:
@@ -53,7 +53,7 @@ Vanilla NDEF readers see only the NPS
 
 Advanced apps can read/write the extra file using DESFire commands
 
-WebApp Integration
+# WebApp Integration
 
 The app integrates with the IPS MERN WebApp to fetch patient data.
 
@@ -65,7 +65,7 @@ https://ipsmern-dep.azurewebsites.net
 
 A Settings button (⚙️) allows switching between backends at runtime.
 
-Workflow
+# Workflow
 
 Fetch list of IPS records (UUID, given name, family name)
 
@@ -81,7 +81,7 @@ Populate the two text areas automatically
 
 Write to NFC card using one of the supported modes
 
-Android UI Overview
+# Android UI Overview
 
 Patient selector (Spinner)
 
@@ -152,7 +152,7 @@ CC file TLVs
 
 Avoids Android’s “greedy” NDEF formatting pitfalls
 
-Project Structure (Key Classes)
+# Project Structure (Key Classes)
 Class	Purpose
 MainActivity	UI, NFC intent handling, workflow coordination
 DesfireHelper	Pure DESFire read/write implementation
@@ -178,7 +178,7 @@ Kotlin
 
 No Compose UI is required for the NFC functionality.
 
-Design Intent
+# Design Intent
 
 This app is not a consumer product.
 
