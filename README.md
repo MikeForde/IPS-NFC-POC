@@ -93,21 +93,21 @@ A Settings button (⚙️) allows switching between backends at runtime.
 
   - Write / Read NATO
 
-Tabbed payload view
+- Tabbed payload view
 
-Read-only (Historic / NPS)
+- Read-only (Historic / NPS)
 
-Read/Write (Extra data)
+- Read/Write (Extra data)
 
-Formatting buttons
+- Formatting buttons
 
-DESFire format
+    - DESFire format
 
-Dual format
+    - Dual format
 
-NATO format
+    - NATO format
 
-Status bar showing operation results and card info
+- Status bar showing operation results and card info
 
 # NFC Card Requirements
 
