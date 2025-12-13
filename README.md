@@ -57,29 +57,29 @@ The app supports three distinct NFC layouts, selectable from the UI:
 
 The app integrates with the IPS MERN WebApp to fetch patient data.
 
-Supported backends
+### Supported backends
 
-http://localhost:5050 (via adb reverse)
+- http://localhost:5050 (via adb reverse)
 
-https://ipsmern-dep.azurewebsites.net
+- https://ipsmern-dep.azurewebsites.net
 
 A Settings button (⚙️) allows switching between backends at runtime.
 
-## Workflow
+### Workflow
 
-Fetch list of IPS records (UUID, given name, family name)
+1. Fetch list of IPS records (UUID, given name, family name)
 
-Select a patient from a dropdown
+2. Select a patient from a dropdown
 
-Fetch a split IPS bundle:
+3. Fetch a split IPS bundle:
 
-RO section → resources ≤ timestamp
+ - RO section → resources ≤ timestamp
 
-RW section → resources > timestamp
+- RW section → resources > timestamp
 
-Populate the two text areas automatically
+4. Populate the two text areas automatically
 
-Write to NFC card using one of the supported modes
+5. Write to NFC card using one of the supported modes
 
 # Android UI Overview
 
