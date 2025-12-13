@@ -87,11 +87,11 @@ A Settings button (⚙️) allows switching between backends at runtime.
 
 - Action buttons
 
-- - Write / Read DESFire
+ - Write / Read DESFire
 
-- - Write / Read Dual
+ - Write / Read Dual
 
-Write / Read NATO
+ - Write / Read NATO
 
 Tabbed payload view
 
