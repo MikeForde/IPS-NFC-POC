@@ -17,7 +17,7 @@ Offline usability
 
 The app supports three distinct NFC layouts, selectable from the UI:
 
-###1️⃣ Pure DESFire (App 665544)
+### 1️⃣ Pure DESFire (App 665544)
 
 Stores two binary blobs in a private DESFire application
 
@@ -27,7 +27,7 @@ Read/write access controlled via DESFire keys
 
 Useful for controlled environments and testing
 
-###2️⃣ Dual Mode (Type-4 NDEF + DESFire)
+### 2️⃣ Dual Mode (Type-4 NDEF + DESFire)
 
 Read-only NATO Patient Summary stored as standard Type-4 NDEF
 
@@ -37,7 +37,7 @@ Read/write “extra” data stored in a private DESFire app
 
 Demonstrates a pragmatic hybrid approach
 
-###3️⃣ NATO Mode (Two NDEF files in App 000001)
+### 3️⃣ NATO Mode (Two NDEF files in App 000001)
 
 Fully aligned with the proposed NATO NPS DESFire layout
 
