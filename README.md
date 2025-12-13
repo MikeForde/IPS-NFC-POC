@@ -81,15 +81,15 @@ A Settings button (⚙️) allows switching between backends at runtime.
 
 5. Write to NFC card using one of the supported modes
 
-# Android UI Overview
+## Android UI Overview
 
-Patient selector (Spinner)
+- Patient selector (Spinner)
 
-Action buttons
+- Action buttons
 
-Write / Read DESFire
+- - Write / Read DESFire
 
-Write / Read Dual
+- - Write / Read Dual
 
 Write / Read NATO
 
