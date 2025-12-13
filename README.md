@@ -139,12 +139,13 @@ A Settings button (⚙️) allows switching between backends at runtime.
 - Avoids Android’s “greedy” NDEF formatting pitfalls
 
 ## Project Structure (Key Classes)
+
 | Class          | Purpose                                                  |
 |----------------|----------------------------------------------------------|
 | MainActivity   | UI, NFC intent handling, workflow coordination           |
 | DesfireHelper  | Pure DESFire read/write implementation                   |
-| NDEFHelper     | Dual mode (Type-4 NDEF + DESFire)                         |
-| NATOHelper     | NATO-compliant two-NDEF-file implementation               |
+| NDEFHelper     | Dual mode (Type-4 NDEF + DESFire)                        |
+| NATOHelper     | NATO-compliant two-NDEF-file implementation              |
 | PayloadBuilder | DESFire command payload construction                     |
 
 ## Development & Testing Notes
