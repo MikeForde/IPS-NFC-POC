@@ -19,41 +19,41 @@ The app supports three distinct NFC layouts, selectable from the UI:
 
 ### 1️⃣ Pure DESFire (App 665544)
 
-Stores two binary blobs in a private DESFire application
+- Stores two binary blobs in a private DESFire application
 
-Fully DESFire-native (not visible to standard NDEF readers)
+- Fully DESFire-native (not visible to standard NDEF readers)
 
-Read/write access controlled via DESFire keys
+- Read/write access controlled via DESFire keys
 
-Useful for controlled environments and testing
+- Useful for controlled environments and testing
 
 ### 2️⃣ Dual Mode (Type-4 NDEF + DESFire)
 
-Read-only NATO Patient Summary stored as standard Type-4 NDEF
+- Read-only NATO Patient Summary stored as standard Type-4 NDEF
 
-Visible to any NFC reader (Android, iOS, desktop)
+- Visible to any NFC reader (Android, iOS, desktop)
 
-Read/write “extra” data stored in a private DESFire app
+- Read/write “extra” data stored in a private DESFire app
 
-Demonstrates a pragmatic hybrid approach
+- Demonstrates a pragmatic hybrid approach
 
 ### 3️⃣ NATO Mode (Two NDEF files in App 000001)
 
-Fully aligned with the proposed NATO NPS DESFire layout
+- Fully aligned with the proposed NATO NPS DESFire layout
 
-A single NDEF application (000001) containing:
+- A single NDEF application (000001) containing:
 
-File E104 – NPS (read-only)
+- File E104 – NPS (read-only)
 
-File E105 – Extra data (read/write)
+- File E105 – Extra data (read/write)
 
-CC file contains two NDEF File Control TLVs
+- CC file contains two NDEF File Control TLVs
 
-Vanilla NDEF readers see only the NPS
+- Vanilla NDEF readers see only the NPS
 
-Advanced apps can read/write the extra file using DESFire commands
+- Advanced apps can read/write the extra file using DESFire commands
 
-# WebApp Integration
+## WebApp Integration
 
 The app integrates with the IPS MERN WebApp to fetch patient data.
 
@@ -65,7 +65,7 @@ https://ipsmern-dep.azurewebsites.net
 
 A Settings button (⚙️) allows switching between backends at runtime.
 
-# Workflow
+## Workflow
 
 Fetch list of IPS records (UUID, given name, family name)
 
