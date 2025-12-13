@@ -73,9 +73,9 @@ A Settings button (⚙️) allows switching between backends at runtime.
 
 3. Fetch a split IPS bundle:
 
-  - RO section → resources ≤ timestamp
+   - RO section → resources ≤ timestamp
 
-  - RW section → resources > timestamp
+   - RW section → resources > timestamp
 
 4. Populate the two text areas automatically
 
