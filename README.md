@@ -109,7 +109,7 @@ NATO format
 
 Status bar showing operation results and card info
 
-NFC Card Requirements
+# NFC Card Requirements
 
 MIFARE DESFire EV1 / EV2 / EV3
 
@@ -117,7 +117,7 @@ MIFARE DESFire EV1 / EV2 / EV3
 
 Android device with NFC and IsoDep support
 
-Technical Highlights
+# Technical Highlights
 DESFire Details
 
 Uses IsoDep + native DESFire commands
@@ -159,7 +159,7 @@ DesfireHelper	Pure DESFire read/write implementation
 NDEFHelper	Dual mode (Type-4 NDEF + DESFire)
 NATOHelper	NATO-compliant two-NDEF-file implementation
 PayloadBuilder	DESFire command payload construction
-Development & Testing Notes
+# Development & Testing Notes
 Local testing
 adb reverse tcp:5050 tcp:5050
 
@@ -167,14 +167,10 @@ adb reverse tcp:5050 tcp:5050
 Then select Local in the app’s Settings menu.
 
 Dependencies
-
-nfcjlib
-
-okhttp
-
-AndroidX / AppCompat
-
-Kotlin
+- nfcjlib
+- okhttp
+- AndroidX / AppCompat
+- Kotlin
 
 No Compose UI is required for the NFC functionality.
 
@@ -192,7 +188,7 @@ A proof-of-concept for NATO-style patient summaries on NFC
 
 A practical companion to backend IPS/NPS experimentation
 
-Limitations & Notes
+# Limitations & Notes
 
 Standard Android/iOS NDEF APIs will only read the first NDEF file
 
@@ -200,7 +196,7 @@ Access to secondary NDEF files requires DESFire-level commands
 
 Cryptographic protection (JWE / omit) is handled by the backend, not the card
 
-License & Usage
+# License & Usage
 
 This code is provided for demonstration, research, and interoperability testing purposes.
 Security parameters, keys, and formats must be reviewed before any operational use.
