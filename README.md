@@ -13,7 +13,7 @@ DESFire-grade security and structure
 Offline usability
 
 ## Key Features
-###🔹 Three NFC Storage Modes
+### 🔹 Three NFC Storage Modes
 
 The app supports three distinct NFC layouts, selectable from the UI:
 
