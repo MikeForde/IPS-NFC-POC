@@ -9,6 +9,7 @@ import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import android.nfc.tech.Ndef
+import android.view.View
 import android.widget.AdapterView
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -19,6 +20,9 @@ import kotlinx.coroutines.withContext
 import androidx.lifecycle.lifecycleScope
 import android.widget.ArrayAdapter
 import android.widget.ImageButton
+import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.Spinner
 import android.widget.TabHost
 
@@ -71,8 +75,28 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     }
 
     private fun ipsListUrl(): String = "${getIpsBase()}/ips/list"
-    private fun ipsSplitUrlBase(): String = "${getIpsBase()}/ipsunifiedsplit/"
 
+    private val KEY_PROTECT_LEVEL = "ips_protect_level"
+
+    private val PROTECT_NONE = 0
+    private val PROTECT_JWE  = 1
+    private val PROTECT_OMIT = 2
+
+    private fun getProtectLevel(): Int {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        return prefs.getInt(KEY_PROTECT_LEVEL, PROTECT_NONE)
+    }
+
+    private fun ipsSplitUrlBase(packageUuid: String): String {
+        val base = "${getIpsBase()}/ipsunifiedsplit/$packageUuid"
+        val protect = getProtectLevel()
+        return "$base?protect=$protect"
+    }
+
+    private fun setProtectLevel(level: Int) {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        prefs.edit().putInt(KEY_PROTECT_LEVEL, level).apply()
+    }
 
 
     private lateinit var statusText: TextView
@@ -113,7 +137,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         setContentView(R.layout.activity_main)
 
         findViewById<ImageButton>(R.id.buttonSettings).setOnClickListener {
-            showBaseUrlChooser()
+            showSettingsDialog()
         }
 
         val tabHost = findViewById<TabHost>(android.R.id.tabhost)
@@ -389,33 +413,88 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
     }
 
-    private fun showBaseUrlChooser() {
-        val options = arrayOf(
+    private fun showSettingsDialog() {
+        val baseOptions = arrayOf(
             "Local (http://localhost:5050)",
             "Azure (https://ipsmern-dep.azurewebsites.net)"
         )
+        val protectOptions = arrayOf(
+            "0 — No protection",
+            "1 — Encrypt identifiers (JWE)",
+            "2 — Omit identifiers"
+        )
 
-        val current = getIpsBase()
-        val checked = when (current) {
+        var selectedBaseIndex = when (getIpsBase()) {
             BASE_AZURE -> 1
             else -> 0
         }
+        var selectedProtect = getProtectLevel().coerceIn(0, 2)
+
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 24, 48, 0)
+        }
+
+        val baseLabel = TextView(this).apply { text = "API base URL"; textSize = 16f }
+        content.addView(baseLabel)
+
+        val baseGroup = RadioGroup(this).apply {
+            orientation = RadioGroup.VERTICAL
+            baseOptions.forEachIndexed { idx, label ->
+                addView(RadioButton(this@MainActivity).apply {
+                    text = label
+                    id = 1000 + idx
+                    isChecked = idx == selectedBaseIndex
+                })
+            }
+            setOnCheckedChangeListener { _, checkedId ->
+                selectedBaseIndex = checkedId - 1000
+            }
+        }
+        content.addView(baseGroup)
+
+        val spacer = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 24
+            )
+        }
+        content.addView(spacer)
+
+        val protectLabel = TextView(this).apply { text = "Protect level"; textSize = 16f }
+        content.addView(protectLabel)
+
+        val protectGroup = RadioGroup(this).apply {
+            orientation = RadioGroup.VERTICAL
+            protectOptions.forEachIndexed { idx, label ->
+                addView(RadioButton(this@MainActivity).apply {
+                    text = label
+                    id = 2000 + idx
+                    isChecked = idx == selectedProtect
+                })
+            }
+            setOnCheckedChangeListener { _, checkedId ->
+                selectedProtect = checkedId - 2000
+            }
+        }
+        content.addView(protectGroup)
 
         androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("API base URL")
-            .setSingleChoiceItems(options, checked) { dialog, which ->
-                val chosen = if (which == 1) BASE_AZURE else BASE_LOCAL
-                setIpsBase(chosen)
+            .setTitle("Settings")
+            .setView(content)
+            .setPositiveButton("Save") { _, _ ->
+                val chosenBase = if (selectedBaseIndex == 1) BASE_AZURE else BASE_LOCAL
+                setIpsBase(chosenBase)
+                setProtectLevel(selectedProtect)
 
-                statusText.text = "API base set to: $chosen"
-                dialog.dismiss()
+                statusText.text = "API: $chosenBase | protect=$selectedProtect"
 
-                // Immediately refresh list + auto-fetch first record (your existing flow)
+                // Refresh list + auto-fetch first patient (your existing behaviour)
                 refreshIpsList()
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
+
 
 
     private fun fetchAndShowSplit(packageUUID: String) {
@@ -424,9 +503,9 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             pendingAction = PendingAction.NONE
         }
 
-        val url = ipsSplitUrlBase() + packageUUID
+        val url = ipsSplitUrlBase(packageUUID)
 
-        val req = okhttp3.Request.Builder()
+        val req = Request.Builder()
             .url(url)
             .get()
             .build()
