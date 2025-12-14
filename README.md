@@ -37,9 +37,9 @@ The app supports three distinct NFC layouts, selectable from the UI:
 - Read/write “extra” data stored in a private DESFire app
 - Demonstrates a pragmatic hybrid approach
 
-### 3️⃣ NATO Mode (Two NDEF files in App 000001)
+### 3️⃣ NDEF Mode (Two NDEF files in App 000001)
 
-- Fully aligned with the proposed NATO NPS DESFire layout
+- Fully aligned with the proposed NLD NPS DESFire layout
 - A single NDEF application (000001) containing:
 - File E104 – NPS (read-only)
 - File E105 – Extra data (read/write)
@@ -81,7 +81,7 @@ A Settings button (⚙️) allows switching between backends at runtime.
 
   - Write / Read DESFire
   - Write / Read Dual
-  - Write / Read NATO
+  - Write / Read NDEF
 
 - Tabbed payload view
 
@@ -92,7 +92,7 @@ A Settings button (⚙️) allows switching between backends at runtime.
 - Formatting buttons
     - DESFire format
     - Dual format
-    - NATO format
+    - NDEF format
 
 - Status bar showing operation results and card info
 
