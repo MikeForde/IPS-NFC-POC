@@ -56,7 +56,12 @@ The app integrates with the IPS MERN WebApp to fetch patient data.
 - http://localhost:5050 (via adb reverse)
 - https://ipsmern-dep.azurewebsites.net (All patient data shown is fictitious)
 
-A Settings button (⚙️) allows switching between backends at runtime.
+### Record Identifier Protection
+- 0 = None
+- 1 = Encrypted (field-level)
+- 2 = Identifiers replaced with "omitted"
+
+A Settings button (⚙️) allows switching between backends and protection levels at runtime.
 
 ### Workflow
 
