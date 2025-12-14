@@ -2,6 +2,8 @@
 
 <p align="center">
   <img src="NPS_POC_App.png" alt="NPS POC Android App" width="400"/>
+  <br/>
+  <em>Patient data shown is fictitious</em>
 </p>
 
 This Android application is a demonstration and reference implementation for writing and reading NATO Patient Summary (NPS) data to MIFARE DESFire EV1/EV2/EV3 NFC cards using several interoperable approaches.
@@ -52,7 +54,7 @@ The app integrates with the IPS MERN WebApp to fetch patient data.
 ### Supported backends
 
 - http://localhost:5050 (via adb reverse)
-- https://ipsmern-dep.azurewebsites.net
+- https://ipsmern-dep.azurewebsites.net (All patient data shown is fictitious)
 
 A Settings button (⚙️) allows switching between backends at runtime.
 
