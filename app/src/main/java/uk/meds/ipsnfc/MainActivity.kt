@@ -64,6 +64,32 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private val BASE_LOCAL = "http://localhost:5050"
     private val BASE_AZURE = "https://ipsmern-dep.azurewebsites.net"
 
+    private val KEY_POC_AUTO_DECOMPRESS = "poc_auto_decompress_rw"
+
+    private fun getPocAutoDecompress(): Boolean {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        return prefs.getBoolean(KEY_POC_AUTO_DECOMPRESS, true) // default ON
+    }
+
+    private fun setPocAutoDecompress(enabled: Boolean) {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_POC_AUTO_DECOMPRESS, enabled).apply()
+    }
+
+    private val KEY_SPLIT_MODE = "ips_split_mode"
+    private val SPLIT_MODE_UNIFIED = 0
+    private val SPLIT_MODE_POC = 1
+
+    private fun getSplitMode(): Int {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        return prefs.getInt(KEY_SPLIT_MODE, SPLIT_MODE_UNIFIED)
+    }
+
+    private fun setSplitMode(mode: Int) {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        prefs.edit().putInt(KEY_SPLIT_MODE, mode).apply()
+    }
+
     private fun getIpsBase(): String {
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         return prefs.getString(KEY_BASE_URL, BASE_AZURE) ?: BASE_AZURE
@@ -87,10 +113,16 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         return prefs.getInt(KEY_PROTECT_LEVEL, PROTECT_NONE)
     }
 
-    private fun ipsSplitUrlBase(packageUuid: String): String {
-        val base = "${getIpsBase()}/ipsunifiedsplit/$packageUuid"
+    private fun ipsSplitUrl(packageUuid: String): String {
         val protect = getProtectLevel()
-        return "$base?protect=$protect"
+        val base = getIpsBase()
+
+        return when (getSplitMode()) {
+            SPLIT_MODE_POC ->
+                "$base/ipsdatasplitpoc/$packageUuid?protect=$protect"
+            else ->
+                "$base/ipsunifiedsplit/$packageUuid?protect=$protect"
+        }
     }
 
     private fun setProtectLevel(level: Int) {
@@ -111,6 +143,12 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private lateinit var buttonWriteNato:Button
     private lateinit var buttonReadNato:Button
     private lateinit var buttonFormatForNATO:Button
+    private lateinit var tabHost: TabHost
+    private lateinit var tabRoLabel: TextView
+    private lateinit var tabRoSize: TextView
+    private lateinit var tabRwLabel: TextView
+    private lateinit var tabRwSize: TextView
+
 
 
     // For now, dummy payloads. Later these will be gzip’d IPS historic/new data.
@@ -140,22 +178,29 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             showSettingsDialog()
         }
 
-        val tabHost = findViewById<TabHost>(android.R.id.tabhost)
+        tabHost = findViewById(android.R.id.tabhost)
         tabHost.setup()
+
+        val (roInd, roRefs) = makeTabIndicator("DATA 1 (RO)")
+        tabRoLabel = roRefs.first
+        tabRoSize  = roRefs.second
+
+        val (rwInd, rwRefs) = makeTabIndicator("DATA 2 (RW)")
+        tabRwLabel = rwRefs.first
+        tabRwSize  = rwRefs.second
 
         tabHost.addTab(
             tabHost.newTabSpec("ro")
-                .setIndicator("RO (NPS)")
+                .setIndicator(roInd)
                 .setContent(R.id.tab_ro)
         )
 
         tabHost.addTab(
             tabHost.newTabSpec("rw")
-                .setIndicator("RW (Extra)")
+                .setIndicator(rwInd)
                 .setContent(R.id.tab_rw)
         )
 
-// Default tab (optional)
         tabHost.currentTab = 0
 
 
@@ -233,6 +278,19 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             statusText.text = "FORMAT for NATO mode: tap DESFire card\n(This will FORMAT for NATO NDEF)"
         }
 
+        textHistoric.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) { updateTabSizes() }
+        })
+
+        textRw.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) { updateTabSizes() }
+        })
+
+
         spinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(
                 parent: android.widget.AdapterView<*>,
@@ -255,9 +313,28 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             }
         }
 
+        fun enableInnerScrolling(editText: EditText) {
+            editText.setOnTouchListener { v, event ->
+                if (v.hasFocus()) {
+                    v.parent.requestDisallowInterceptTouchEvent(true)
+
+                    if (event.action == android.view.MotionEvent.ACTION_UP) {
+                        v.parent.requestDisallowInterceptTouchEvent(false)
+                    }
+                }
+                false
+            }
+        }
+
+
         findViewById<Button>(R.id.buttonRefreshIps).setOnClickListener {
             refreshIpsList()
         }
+
+        enableInnerScrolling(textHistoric)
+        enableInnerScrolling(textRw)
+        updateTabSizes()
+
 
 // load once at startup
         refreshIpsList()
@@ -287,6 +364,67 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             options
         )
     }
+
+    private fun decodeBase64(s: String): ByteArray {
+        return android.util.Base64.decode(s, android.util.Base64.DEFAULT)
+    }
+
+    private fun gunzip(bytes: ByteArray): ByteArray {
+        java.util.zip.GZIPInputStream(bytes.inputStream()).use { gis ->
+            val out = java.io.ByteArrayOutputStream()
+            val buf = ByteArray(4096)
+            while (true) {
+                val n = gis.read(buf)
+                if (n <= 0) break
+                out.write(buf, 0, n)
+            }
+            return out.toByteArray()
+        }
+    }
+
+    private fun makeTabIndicator(title: String): Pair<View, Pair<TextView, TextView>> {
+        val wrap = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16, 8, 16, 8)
+            setBackgroundResource(R.drawable.tab_indicator_bg)
+            isClickable = true
+            isFocusable = true
+        }
+
+        val t1 = TextView(this).apply {
+            text = title
+            textSize = 14f
+            setSingleLine(true)
+        }
+
+        val t2 = TextView(this).apply {
+            text = "0 B"
+            textSize = 11f
+            alpha = 0.8f
+            setSingleLine(true)
+        }
+
+        wrap.addView(t1)
+        wrap.addView(t2)
+        return wrap to (t1 to t2)
+    }
+
+    private fun formatBytes(n: Int): String {
+        if (n < 1024) return "$n B"
+        val kb = n / 1024.0
+        return String.format("%.1f KB (%d B)", kb, n)
+    }
+
+    private fun editTextByteSize(et: EditText): Int {
+        // count bytes as actually written to NFC / sent over network (UTF-8)
+        return et.text?.toString()?.toByteArray(Charsets.UTF_8)?.size ?: 0
+    }
+
+    private fun updateTabSizes() {
+        tabRoSize.text = formatBytes(editTextByteSize(textHistoric))
+        tabRwSize.text = formatBytes(editTextByteSize(textRw))
+    }
+
 
 
     private fun disableReaderMode() {
@@ -424,6 +562,16 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             "2 — Omit identifiers"
         )
 
+        val splitOptions = arrayOf(
+            "Unified split (RO/RW JSON via /ipsunifiedsplit)",
+            "POC split (RO plaintext + RW gzipped unified JSON via /ipsdatasplitpoc)"
+        )
+
+        var selectedSplit = getSplitMode().coerceIn(0, 1)
+
+        var selectedAutoDecompress = getPocAutoDecompress()
+
+
         var selectedBaseIndex = when (getIpsBase()) {
             BASE_AZURE -> 1
             else -> 0
@@ -478,24 +626,78 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
         content.addView(protectGroup)
 
+        val spacer2 = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 24
+            )
+        }
+        content.addView(spacer2)
+
+        val splitLabel = TextView(this).apply { text = "Split mode"; textSize = 16f }
+        content.addView(splitLabel)
+
+        val splitGroup = RadioGroup(this).apply {
+            orientation = RadioGroup.VERTICAL
+            splitOptions.forEachIndexed { idx, label ->
+                addView(RadioButton(this@MainActivity).apply {
+                    text = label
+                    id = 3000 + idx
+                    isChecked = idx == selectedSplit
+                })
+            }
+            setOnCheckedChangeListener { _, checkedId ->
+                selectedSplit = checkedId - 3000
+            }
+        }
+        content.addView(splitGroup)
+
+        val spacer3 = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 24
+            )
+        }
+        content.addView(spacer3)
+
+        val cb = android.widget.CheckBox(this).apply {
+            text = "Auto-decompress RW (POC only)"
+            isChecked = selectedAutoDecompress
+            setOnCheckedChangeListener { _, checked ->
+                selectedAutoDecompress = checked
+            }
+        }
+        content.addView(cb)
+
+
         androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Settings")
             .setView(content)
             .setPositiveButton("Save") { _, _ ->
+
+                val previousBase = getIpsBase()
                 val chosenBase = if (selectedBaseIndex == 1) BASE_AZURE else BASE_LOCAL
+
+                val baseChanged = (chosenBase != previousBase)
+
                 setIpsBase(chosenBase)
                 setProtectLevel(selectedProtect)
+                setSplitMode(selectedSplit)
+                setPocAutoDecompress(selectedAutoDecompress)
 
-                statusText.text = "API: $chosenBase | protect=$selectedProtect"
+                statusText.text =
+                    "API: $chosenBase | protect=$selectedProtect | mode=$selectedSplit | unzip=$selectedAutoDecompress"
 
-                // Refresh list + auto-fetch first patient (your existing behaviour)
-                refreshIpsList()
+                if (baseChanged) {
+                    // New server → list likely differs
+                    refreshIpsList()
+                } else {
+                    // Same server → just re-fetch current patient with new protect/mode settings
+                    selectedPackageUuid?.let { fetchAndShowSplit(it) }
+                        ?: run { refreshIpsList() } // fallback if nothing selected yet
+                }
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
-
-
 
     private fun fetchAndShowSplit(packageUUID: String) {
         runOnUiThread {
@@ -503,7 +705,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             pendingAction = PendingAction.NONE
         }
 
-        val url = ipsSplitUrlBase(packageUUID)
+        val url = ipsSplitUrl(packageUUID)
 
         val req = Request.Builder()
             .url(url)
@@ -512,41 +714,81 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
         httpClient.newCall(req).enqueue(object : okhttp3.Callback {
             override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
-                runOnUiThread {
-                    statusText.text = "Fetch failed: ${e.message}"
-                }
+                runOnUiThread { statusText.text = "Fetch failed: ${e.message}" }
             }
 
             override fun onResponse(call: okhttp3.Call, resp: okhttp3.Response) {
                 resp.use {
                     if (!it.isSuccessful) {
-                        runOnUiThread {
-                            statusText.text = "Fetch failed: HTTP ${it.code}"
-                        }
+                        runOnUiThread { statusText.text = "Fetch failed: HTTP ${it.code}" }
                         return
                     }
 
                     val body = it.body?.string().orEmpty()
+
                     try {
-                        val split = gson.fromJson(body, SplitResponse::class.java)
+                        val mode = getSplitMode()
 
-                        val roPretty = gson.toJson(split.ro)
-                        val rwPretty = gson.toJson(split.rw)
+                        if (mode == SPLIT_MODE_POC) {
+                            // Expected shape (POC):
+                            // { ro: { text: "...", ... }, rw: { bytesBase64: "...", ... }, ... }
+                            val root = org.json.JSONObject(body)
+                            val roObj = root.optJSONObject("ro")
+                            val rwObj = root.optJSONObject("rw")
 
-                        runOnUiThread {
-                            textHistoric.setText(roPretty)
-                            textRw.setText(rwPretty)
-                            statusText.text = "Loaded IPS for $packageUUID"
+                            val roText = roObj?.optString("text", "") ?: ""
+                            val b64 = rwObj?.optString("bytesBase64", "") ?: ""
+
+                            val autoDecompress = getPocAutoDecompress()
+
+                            val rwDisplay = when {
+                                b64.isBlank() -> ""
+                                !autoDecompress -> {
+                                    // Show compact form directly (base64), optionally with a small header
+//                                    "base64(gzip) length=${b64.length}\n\n$b64"
+                                    b64
+                                }
+                                else -> {
+                                    // Decode + gunzip + pretty JSON
+                                    val gz = decodeBase64(b64)
+                                    val jsonBytes = gunzip(gz)
+                                    val jsonStr = jsonBytes.toString(Charsets.UTF_8)
+                                    val parsed = gson.fromJson(jsonStr, Any::class.java)
+                                    gson.toJson(parsed)
+                                }
+                            }
+
+                            runOnUiThread {
+                                textHistoric.setText(roText)
+                                textRw.setText(rwDisplay)
+                                statusText.text = if (autoDecompress)
+                                    "Loaded POC split for $packageUUID (decompressed RW)"
+                                else
+                                    "Loaded POC split for $packageUUID (compact RW base64)"
+                            }
+
+                        } else {
+                            // Existing /ipsunifiedsplit shape:
+                            // { ro: {...}, rw: {...}, ... }
+                            val split = gson.fromJson(body, SplitResponse::class.java)
+
+                            val roPretty = gson.toJson(split.ro)
+                            val rwPretty = gson.toJson(split.rw)
+
+                            runOnUiThread {
+                                textHistoric.setText(roPretty)
+                                textRw.setText(rwPretty)
+                                statusText.text = "Loaded unified split for $packageUUID"
+                            }
                         }
                     } catch (ex: Exception) {
-                        runOnUiThread {
-                            statusText.text = "Parse failed: ${ex.message}"
-                        }
+                        runOnUiThread { statusText.text = "Parse failed: ${ex.message}" }
                     }
                 }
             }
         })
     }
+
 
 
     private fun refreshIpsList() {

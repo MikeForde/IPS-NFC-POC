@@ -190,9 +190,10 @@
                             android:inputType="textMultiLine|textNoSuggestions"
                             android:gravity="top|start"
                             android:overScrollMode="always"
+                            android:fadeScrollbars="false"
                             android:scrollbars="vertical"
                             android:padding="8dp"
-                            android:hint="NATO Patient Summary (read-only)"
+                            android:hint="Vanilla NFC Readable (read-only)"
 
                             android:textSize="12sp"
                             android:typeface="monospace"
@@ -219,8 +220,9 @@
                             android:gravity="top|start"
                             android:overScrollMode="always"
                             android:scrollbars="vertical"
+                            android:fadeScrollbars="false"
                             android:padding="8dp"
-                            android:hint="Extra data (read/write)"
+                            android:hint="Hidden data (read/write)"
 
                             android:textSize="12sp"
                             android:typeface="monospace"
