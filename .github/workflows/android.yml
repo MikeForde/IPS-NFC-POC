@@ -36,3 +36,9 @@ jobs:
         with:
           name: app-release
           path: app/build/outputs/apk/release/*.apk
+
+      - name: Publish APK to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/*.apk
+
