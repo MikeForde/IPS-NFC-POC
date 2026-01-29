@@ -728,10 +728,10 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
                     try {
                         val mode = getSplitMode()
+                        val autoDecompress = getPocAutoDecompress() // reuse this toggle for BOTH modes
 
                         if (mode == SPLIT_MODE_POC) {
-                            // Expected shape (POC):
-                            // { ro: { text: "...", ... }, rw: { bytesBase64: "...", ... }, ... }
+                            // POC shape (your existing logic)
                             val root = org.json.JSONObject(body)
                             val roObj = root.optJSONObject("ro")
                             val rwObj = root.optJSONObject("rw")
@@ -739,17 +739,10 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                             val roText = roObj?.optString("text", "") ?: ""
                             val b64 = rwObj?.optString("bytesBase64", "") ?: ""
 
-                            val autoDecompress = getPocAutoDecompress()
-
                             val rwDisplay = when {
                                 b64.isBlank() -> ""
-                                !autoDecompress -> {
-                                    // Show compact form directly (base64), optionally with a small header
-//                                    "base64(gzip) length=${b64.length}\n\n$b64"
-                                    b64
-                                }
+                                !autoDecompress -> b64
                                 else -> {
-                                    // Decode + gunzip + pretty JSON
                                     val gz = decodeBase64(b64)
                                     val jsonBytes = gunzip(gz)
                                     val jsonStr = jsonBytes.toString(Charsets.UTF_8)
@@ -761,26 +754,79 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                             runOnUiThread {
                                 textHistoric.setText(roText)
                                 textRw.setText(rwDisplay)
-                                statusText.text = if (autoDecompress)
-                                    "Loaded POC split for $packageUUID (decompressed RW)"
-                                else
-                                    "Loaded POC split for $packageUUID (compact RW base64)"
+                                statusText.text =
+                                    if (autoDecompress)
+                                        "Loaded POC split for $packageUUID (decompressed RW)"
+                                    else
+                                        "Loaded POC split for $packageUUID (compact RW base64)"
                             }
 
                         } else {
-                            // Existing /ipsunifiedsplit shape:
-                            // { ro: {...}, rw: {...}, ... }
-                            val split = gson.fromJson(body, SplitResponse::class.java)
+                            // Unified split: NOW supports gzip+base64 default response
+                            val root = org.json.JSONObject(body)
+                            val encoding = root.optString("encoding", "json")
 
-                            val roPretty = gson.toJson(split.ro)
-                            val rwPretty = gson.toJson(split.rw)
+                            if (encoding.equals("gzip+base64", ignoreCase = true)) {
+                                val roB64 = root.optString("roGzB64", "")
+                                val rwB64 = root.optString("rwGzB64", "")
 
-                            runOnUiThread {
-                                textHistoric.setText(roPretty)
-                                textRw.setText(rwPretty)
-                                statusText.text = "Loaded unified split for $packageUUID"
+                                val roBytesJson = root.optInt("roBytesJson", -1)
+                                val rwBytesJson = root.optInt("rwBytesJson", -1)
+                                val roBytesGz   = root.optInt("roBytesGz", -1)
+                                val rwBytesGz   = root.optInt("rwBytesGz", -1)
+
+                                val roDisplay = when {
+                                    roB64.isBlank() -> ""
+                                    !autoDecompress -> roB64
+                                    else -> {
+                                        val gz = decodeBase64(roB64)
+                                        val jsonBytes = gunzip(gz)
+                                        val jsonStr = jsonBytes.toString(Charsets.UTF_8)
+                                        val parsed = gson.fromJson(jsonStr, Any::class.java)
+                                        gson.toJson(parsed)
+                                    }
+                                }
+
+                                val rwDisplay = when {
+                                    rwB64.isBlank() -> ""
+                                    !autoDecompress -> rwB64
+                                    else -> {
+                                        val gz = decodeBase64(rwB64)
+                                        val jsonBytes = gunzip(gz)
+                                        val jsonStr = jsonBytes.toString(Charsets.UTF_8)
+                                        val parsed = gson.fromJson(jsonStr, Any::class.java)
+                                        gson.toJson(parsed)
+                                    }
+                                }
+
+                                runOnUiThread {
+                                    textHistoric.setText(roDisplay)
+                                    textRw.setText(rwDisplay)
+
+                                    statusText.text =
+                                        if (autoDecompress) {
+                                            "Loaded unified split for $packageUUID (decompressed) " +
+                                                    "RO: $roBytesGz→$roBytesJson bytes, RW: $rwBytesGz→$rwBytesJson bytes"
+                                        } else {
+                                            "Loaded unified split for $packageUUID (compact base64) " +
+                                                    "RO gz=$roBytesGz, RW gz=$rwBytesGz"
+                                        }
+                                }
+
+                            } else {
+                                // Old JSON shape: { ro: {...}, rw: {...}, ... }
+                                val split = gson.fromJson(body, SplitResponse::class.java)
+                                val roPretty = gson.toJson(split.ro)
+                                val rwPretty = gson.toJson(split.rw)
+
+                                runOnUiThread {
+                                    textHistoric.setText(roPretty)
+                                    textRw.setText(rwPretty)
+                                    statusText.text = "Loaded unified split for $packageUUID"
+                                }
                             }
                         }
+
                     } catch (ex: Exception) {
                         runOnUiThread { statusText.text = "Parse failed: ${ex.message}" }
                     }
@@ -788,6 +834,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             }
         })
     }
+
 
 
 
