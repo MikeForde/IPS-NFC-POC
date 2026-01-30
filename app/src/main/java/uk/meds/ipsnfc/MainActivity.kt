@@ -659,7 +659,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         content.addView(spacer3)
 
         val cb = android.widget.CheckBox(this).apply {
-            text = "Auto-decompress RW (POC only)"
+            text = "Auto Decompress/Unzip"
             isChecked = selectedAutoDecompress
             setOnCheckedChangeListener { _, checked ->
                 selectedAutoDecompress = checked
