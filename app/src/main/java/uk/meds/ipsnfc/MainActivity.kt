@@ -30,6 +30,17 @@ import android.widget.TabHost
 
 class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
+    // Authoritative in-app payloads (NOT the textboxes)
+    private var roBytes: ByteArray = ByteArray(0)
+    private var rwBytes: ByteArray = ByteArray(0)
+
+    private val MIME_NPS_GZ  = "application/x.nps.gzip.v1-0"
+    private val MIME_EXT_GZ  = "application/x.ext.gzip.v1-0"
+
+    // Optional: remember whether each blob is currently gzipped (binary)
+    private var roIsGzip: Boolean = false
+    private var rwIsGzip: Boolean = false
+
     private enum class PendingAction { NONE, WRITE, READ, FORMAT, WRITE_DUAL_NDEF, FORMAT_FOR_NDEF, READ_DUAL_NDEF, WRITE_NATO, READ_NATO, FORMAT_NATO }
 
     private var nfcAdapter: NfcAdapter? = null
@@ -369,6 +380,53 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         return android.util.Base64.decode(s, android.util.Base64.DEFAULT)
     }
 
+    private fun isGzip(bytes: ByteArray): Boolean {
+        return bytes.size >= 2 && bytes[0] == 0x1F.toByte() && bytes[1] == 0x8B.toByte()
+    }
+
+    private fun looksLikeBase64(s: String): Boolean {
+        val t = s.trim()
+        if (t.length < 8) return false
+        // base64 charset + optional newlines
+        return t.all { it.isLetterOrDigit() || it == '+' || it == '/' || it == '=' || it == '\n' || it == '\r' }
+    }
+
+    private fun gzip(bytes: ByteArray): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        java.util.zip.GZIPOutputStream(out).use { it.write(bytes) }
+        return out.toByteArray()
+    }
+
+    // Convert bytes -> what we show in the textbox
+// If autoDecompress is ON and it's gz, show decompressed pretty JSON if possible.
+// If OFF and it's gz, show base64 to illustrate compactness.
+    private fun bytesToUiString(bytes: ByteArray, autoDecompress: Boolean): String {
+        if (bytes.isEmpty()) return ""
+
+        return if (isGzip(bytes)) {
+            if (!autoDecompress) {
+                // compact view: base64 of gzip bytes
+                android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            } else {
+                val raw = gunzip(bytes)
+                val s = raw.toString(Charsets.UTF_8)
+                // try pretty JSON; if not JSON, just return as-is
+                runCatching {
+                    val parsed = gson.fromJson(s, Any::class.java)
+                    gson.toJson(parsed)
+                }.getOrDefault(s)
+            }
+        } else {
+            // plain UTF-8
+            val s = bytes.toString(Charsets.UTF_8)
+            runCatching {
+                val parsed = gson.fromJson(s, Any::class.java)
+                gson.toJson(parsed)
+            }.getOrDefault(s)
+        }
+    }
+
+
     private fun gunzip(bytes: ByteArray): ByteArray {
         java.util.zip.GZIPInputStream(bytes.inputStream()).use { gis ->
             val out = java.io.ByteArrayOutputStream()
@@ -412,20 +470,91 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private fun formatBytes(n: Int): String {
         if (n < 1024) return "$n B"
         val kb = n / 1024.0
-        return String.format("%.1f KB (%d B)", kb, n)
+        return String.format("%.1f KB", kb, n)
     }
 
-    private fun editTextByteSize(et: EditText): Int {
-        // count bytes as actually written to NFC / sent over network (UTF-8)
-        return et.text?.toString()?.toByteArray(Charsets.UTF_8)?.size ?: 0
+//    private fun editTextByteSize(et: EditText): Int {
+//        // count bytes as actually written to NFC / sent over network (UTF-8)
+//        return et.text?.toString()?.toByteArray(Charsets.UTF_8)?.size ?: 0
+//    }
+
+    private fun gunzippedSize(bytes: ByteArray?): Int {
+        if (bytes == null) return 0
+        return try {
+            gunzip(bytes).size
+        } catch (_: Exception) {
+            0
+        }
     }
+
+    private fun looksLikeGzip(bytes: ByteArray?): Boolean {
+        return bytes != null &&
+                bytes.size >= 2 &&
+                bytes[0] == 0x1F.toByte() &&
+                bytes[1] == 0x8B.toByte()
+    }
+
+    // Always return gzip-binary bytes for writing (never base64 text)
+    private fun ensureGzipBytesForWrite(
+        preferredGzip: ByteArray?,
+        editText: EditText,
+        fallbackJson: String
+    ): ByteArray {
+        // 1) If we already have canonical gzip bytes, use them.
+        if (preferredGzip != null && preferredGzip.isNotEmpty() && looksLikeGzip(preferredGzip)) {
+            return preferredGzip
+        }
+
+        // 2) Otherwise treat the UI as plaintext JSON/text and gzip it.
+        val s = editText.text?.toString().orEmpty().ifBlank { fallbackJson }
+        return gzip(s.toByteArray(Charsets.UTF_8))
+    }
+
+
+    private fun formatZippedAndUnzipped(zipped: Int, unzipped: Int): String {
+        return when {
+            zipped > 0 && unzipped > 0 ->
+                "Z: ${formatBytes(zipped)}  U: ${formatBytes(unzipped)}"
+            zipped > 0 ->
+                "Z: ${formatBytes(zipped)}"
+            unzipped > 0 ->
+                "U: ${formatBytes(unzipped)}"
+            else ->
+                "0 B"
+        }
+    }
+
 
     private fun updateTabSizes() {
-        tabRoSize.text = formatBytes(editTextByteSize(textHistoric))
-        tabRwSize.text = formatBytes(editTextByteSize(textRw))
+        // --- RO ---
+        val roZipped = roGzipBytes?.size ?: 0
+        val roUnzipped =
+            if (roIsPlaintext) {
+                roPlainText?.toByteArray(Charsets.UTF_8)?.size ?: 0
+            } else {
+                gunzippedSize(roGzipBytes)
+            }
+
+        // --- RW ---
+        val rwZipped = rwGzipBytes?.size ?: 0
+        val rwUnzipped = gunzippedSize(rwGzipBytes)
+
+        tabRoSize.text = formatZippedAndUnzipped(roZipped, roUnzipped)
+        tabRwSize.text = formatZippedAndUnzipped(rwZipped, rwUnzipped)
     }
 
 
+    private fun refreshTextViewsFromBytes() {
+        val autoDecompress = getPocAutoDecompress()
+
+        textHistoric.setText(bytesToUiString(roBytes, autoDecompress))
+        textRw.setText(bytesToUiString(rwBytes, autoDecompress))
+
+        roIsGzip = isGzip(roBytes)
+        rwIsGzip = isGzip(rwBytes)
+
+        updateTabSizes()
+    }
 
     private fun disableReaderMode() {
         nfcAdapter?.disableReaderMode(this)
@@ -699,6 +828,30 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             .show()
     }
 
+    private fun capturePlaintextEditsIntoBytes() {
+        // Only treat textbox as authoritative when we are not gzipped
+        // AND the textbox doesn't look like a base64 display string.
+        val roText = textHistoric.text.toString()
+        if (!roIsGzip && !looksLikeBase64(roText)) {
+            roBytes = roText.toByteArray(Charsets.UTF_8)
+        }
+
+        val rwText = textRw.text.toString()
+        if (!rwIsGzip && !looksLikeBase64(rwText)) {
+            rwBytes = rwText.toByteArray(Charsets.UTF_8)
+        }
+
+        updateTabSizes()
+    }
+
+    // --- NEW: store the "real" payloads separately from the EditTexts ---
+// Universal internal representation: gzip binary for both, unless RO is plaintext POC.
+    private var roIsPlaintext: Boolean = true
+    private var roPlainText: String? = null
+    private var roGzipBytes: ByteArray? = null
+
+    private var rwGzipBytes: ByteArray? = null
+
     private fun fetchAndShowSplit(packageUUID: String) {
         runOnUiThread {
             statusText.text = "Fetching IPS split for $packageUUID..."
@@ -728,101 +881,184 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
                     try {
                         val mode = getSplitMode()
-                        val autoDecompress = getPocAutoDecompress() // reuse this toggle for BOTH modes
+                        val autoDecompress = getPocAutoDecompress() // toggle reused for both modes
+                        val root = org.json.JSONObject(body)
+
+                        // reset stored payloads
+                        roIsPlaintext = false
+                        roPlainText = null
+                        roGzipBytes = null
+                        rwGzipBytes = null
+
+                        var uiRoText = ""
+                        var uiRwText = ""
+
+                        var roBytesGz = -1
+                        var rwBytesGz = -1
+                        var roBytesJson = -1
+                        var rwBytesJson = -1
 
                         if (mode == SPLIT_MODE_POC) {
-                            // POC shape (your existing logic)
-                            val root = org.json.JSONObject(body)
+                            // Expected POC shape:
+                            // ro: { text: "...." }   (plaintext)
+                            // rw: { bytesBase64: "...." }  (gzip binary encoded as base64)
                             val roObj = root.optJSONObject("ro")
                             val rwObj = root.optJSONObject("rw")
 
                             val roText = roObj?.optString("text", "") ?: ""
-                            val b64 = rwObj?.optString("bytesBase64", "") ?: ""
+                            roIsPlaintext = true
+                            roPlainText = roText
 
-                            val rwDisplay = when {
-                                b64.isBlank() -> ""
-                                !autoDecompress -> b64
+                            val rwB64 = rwObj?.optString("bytesBase64", "") ?: ""
+
+                            // Store RW as gzip binary
+                            if (rwB64.isNotBlank()) {
+                                rwGzipBytes = decodeBase64(rwB64)
+                                rwBytesGz = rwGzipBytes?.size ?: -1
+                            }
+
+                            // UI
+                            uiRoText = roText
+
+                            uiRwText = when {
+                                rwGzipBytes == null -> ""
+                                !autoDecompress -> {
+                                    // show base64 (compact string) for illustration
+                                    android.util.Base64.encodeToString(rwGzipBytes, android.util.Base64.NO_WRAP)
+                                }
                                 else -> {
-                                    val gz = decodeBase64(b64)
-                                    val jsonBytes = gunzip(gz)
+                                    val jsonBytes = gunzip(rwGzipBytes!!)
+                                    rwBytesJson = jsonBytes.size
                                     val jsonStr = jsonBytes.toString(Charsets.UTF_8)
-                                    val parsed = gson.fromJson(jsonStr, Any::class.java)
-                                    gson.toJson(parsed)
+
+                                    // pretty print JSON if possible; otherwise show raw text
+                                    try {
+                                        val parsed = gson.fromJson(jsonStr, Any::class.java)
+                                        gson.toJson(parsed)
+                                    } catch (_: Exception) {
+                                        jsonStr
+                                    }
                                 }
                             }
 
-                            runOnUiThread {
-                                textHistoric.setText(roText)
-                                textRw.setText(rwDisplay)
-                                statusText.text =
-                                    if (autoDecompress)
-                                        "Loaded POC split for $packageUUID (decompressed RW)"
-                                    else
-                                        "Loaded POC split for $packageUUID (compact RW base64)"
-                            }
-
                         } else {
-                            // Unified split: NOW supports gzip+base64 default response
-                            val root = org.json.JSONObject(body)
+                            // Unified split new shape (gzip+base64 default):
+                            // {
+                            //   encoding:"gzip+base64",
+                            //   roGzB64:"...",
+                            //   rwGzB64:"...",
+                            //   roBytesJson:..., rwBytesJson:..., roBytesGz:..., rwBytesGz:...
+                            // }
                             val encoding = root.optString("encoding", "json")
 
                             if (encoding.equals("gzip+base64", ignoreCase = true)) {
                                 val roB64 = root.optString("roGzB64", "")
                                 val rwB64 = root.optString("rwGzB64", "")
 
-                                val roBytesJson = root.optInt("roBytesJson", -1)
-                                val rwBytesJson = root.optInt("rwBytesJson", -1)
-                                val roBytesGz   = root.optInt("roBytesGz", -1)
-                                val rwBytesGz   = root.optInt("rwBytesGz", -1)
+                                roBytesJson = root.optInt("roBytesJson", -1)
+                                rwBytesJson = root.optInt("rwBytesJson", -1)
+                                roBytesGz   = root.optInt("roBytesGz", -1)
+                                rwBytesGz   = root.optInt("rwBytesGz", -1)
 
-                                val roDisplay = when {
-                                    roB64.isBlank() -> ""
-                                    !autoDecompress -> roB64
+                                // Store BOTH as gzip binary
+                                if (roB64.isNotBlank()) roGzipBytes = decodeBase64(roB64)
+                                if (rwB64.isNotBlank()) rwGzipBytes = decodeBase64(rwB64)
+
+                                // prefer actual sizes from bytes if server didn't provide
+                                if (roBytesGz < 0) roBytesGz = roGzipBytes?.size ?: -1
+                                if (rwBytesGz < 0) rwBytesGz = rwGzipBytes?.size ?: -1
+
+                                // UI for RO
+                                uiRoText = when {
+                                    roGzipBytes == null -> ""
+                                    !autoDecompress -> android.util.Base64.encodeToString(roGzipBytes, android.util.Base64.NO_WRAP)
                                     else -> {
-                                        val gz = decodeBase64(roB64)
-                                        val jsonBytes = gunzip(gz)
+                                        val jsonBytes = gunzip(roGzipBytes!!)
+                                        if (roBytesJson < 0) roBytesJson = jsonBytes.size
                                         val jsonStr = jsonBytes.toString(Charsets.UTF_8)
-                                        val parsed = gson.fromJson(jsonStr, Any::class.java)
-                                        gson.toJson(parsed)
-                                    }
-                                }
-
-                                val rwDisplay = when {
-                                    rwB64.isBlank() -> ""
-                                    !autoDecompress -> rwB64
-                                    else -> {
-                                        val gz = decodeBase64(rwB64)
-                                        val jsonBytes = gunzip(gz)
-                                        val jsonStr = jsonBytes.toString(Charsets.UTF_8)
-                                        val parsed = gson.fromJson(jsonStr, Any::class.java)
-                                        gson.toJson(parsed)
-                                    }
-                                }
-
-                                runOnUiThread {
-                                    textHistoric.setText(roDisplay)
-                                    textRw.setText(rwDisplay)
-
-                                    statusText.text =
-                                        if (autoDecompress) {
-                                            "Loaded unified split for $packageUUID (decompressed) " +
-                                                    "RO: $roBytesGz→$roBytesJson bytes, RW: $rwBytesGz→$rwBytesJson bytes"
-                                        } else {
-                                            "Loaded unified split for $packageUUID (compact base64) " +
-                                                    "RO gz=$roBytesGz, RW gz=$rwBytesGz"
+                                        try {
+                                            val parsed = gson.fromJson(jsonStr, Any::class.java)
+                                            gson.toJson(parsed)
+                                        } catch (_: Exception) {
+                                            jsonStr
                                         }
+                                    }
+                                }
+
+                                // UI for RW
+                                uiRwText = when {
+                                    rwGzipBytes == null -> ""
+                                    !autoDecompress -> android.util.Base64.encodeToString(rwGzipBytes, android.util.Base64.NO_WRAP)
+                                    else -> {
+                                        val jsonBytes = gunzip(rwGzipBytes!!)
+                                        if (rwBytesJson < 0) rwBytesJson = jsonBytes.size
+                                        val jsonStr = jsonBytes.toString(Charsets.UTF_8)
+                                        try {
+                                            val parsed = gson.fromJson(jsonStr, Any::class.java)
+                                            gson.toJson(parsed)
+                                        } catch (_: Exception) {
+                                            jsonStr
+                                        }
+                                    }
                                 }
 
                             } else {
-                                // Old JSON shape: { ro: {...}, rw: {...}, ... }
+                                // Old JSON shape: { ro: {...}, rw: {...} }
+                                // Keep old behaviour for now (and also stash plaintext in RO/RW edit boxes).
                                 val split = gson.fromJson(body, SplitResponse::class.java)
                                 val roPretty = gson.toJson(split.ro)
                                 val rwPretty = gson.toJson(split.rw)
 
-                                runOnUiThread {
-                                    textHistoric.setText(roPretty)
-                                    textRw.setText(rwPretty)
-                                    statusText.text = "Loaded unified split for $packageUUID"
+                                roIsPlaintext = true
+                                roPlainText = roPretty
+                                // (No gzip bytes in this legacy response)
+                                roGzipBytes = null
+                                rwGzipBytes = null
+
+                                uiRoText = roPretty
+                                uiRwText = rwPretty
+                            }
+                        }
+
+                        roBytes = when {
+                            roGzipBytes != null -> roGzipBytes!!
+                            roIsPlaintext       -> (roPlainText ?: "").toByteArray(Charsets.UTF_8)
+                            else                -> ByteArray(0)
+                        }
+
+                        rwBytes = when {
+                            rwGzipBytes != null -> rwGzipBytes!!
+                            else                -> ByteArray(0)
+                        }
+
+                        roIsGzip = looksLikeGzip(roBytes)
+                        rwIsGzip = looksLikeGzip(rwBytes)
+
+                        runOnUiThread {
+                            textHistoric.setText(uiRoText)
+                            textRw.setText(uiRwText)
+                            updateTabSizes()
+
+                            statusText.text = when (mode) {
+                                SPLIT_MODE_POC -> {
+                                    if (autoDecompress) {
+                                        "Loaded POC split for $packageUUID (RW decompressed) gz=${rwBytesGz}B"
+                                    } else {
+                                        "Loaded POC split for $packageUUID (RW compact base64) gz=${rwBytesGz}B"
+                                    }
+                                }
+                                else -> {
+                                    if (roGzipBytes != null || rwGzipBytes != null) {
+                                        if (autoDecompress) {
+                                            "Loaded unified split for $packageUUID (decompressed) " +
+                                                    "RO: ${roBytesGz}→${roBytesJson} bytes, RW: ${rwBytesGz}→${rwBytesJson} bytes"
+                                        } else {
+                                            "Loaded unified split for $packageUUID (compact base64) " +
+                                                    "RO gz=${roBytesGz}B, RW gz=${rwBytesGz}B"
+                                        }
+                                    } else {
+                                        "Loaded unified split for $packageUUID"
+                                    }
                                 }
                             }
                         }
@@ -834,6 +1070,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             }
         })
     }
+
 
 
 
@@ -925,20 +1162,74 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
 
         try {
-            val ok = helper.writeNatoPayloads(
-                npsMimeType = "application/x.nps.v1-0",
-                npsPayload = textHistoric.text.toString().toByteArray(),
-                extraMimeType = "application/x.ext.v1-0",
-                extraPayload = textRw.text.toString().toByteArray()
+            val isPoc = (getSplitMode() == SPLIT_MODE_POC)
+
+            // --- NPS / RO ---
+            val npsMime: String
+            val npsPayload: ByteArray
+
+            if (isPoc) {
+                // POC rule: RO is plaintext as typed/shown
+                val roText = textHistoric.text?.toString().orEmpty()
+                    .ifBlank { """{"type":"nps","msg":"NPS default"}""" }
+
+                npsMime = "application/x.nps.v1-0"
+                npsPayload = roText.toByteArray(Charsets.UTF_8)
+
+                // Keep vars consistent (plaintext)
+                roBytes = npsPayload
+                roGzipBytes = null
+                roIsGzip = false
+                roIsPlaintext = true
+                roPlainText = roText
+            } else {
+                // Unified rule: RO always gzip-binary
+                npsMime = MIME_NPS_GZ
+                npsPayload = ensureGzipBytesForWrite(
+                    preferredGzip = roGzipBytes,
+                    editText = textHistoric,
+                    fallbackJson = """{"type":"nps","msg":"NPS default"}"""
+                )
+
+                roBytes = npsPayload
+                roGzipBytes = npsPayload
+                roIsGzip = true
+                roIsPlaintext = false
+                roPlainText = null
+            }
+
+            // --- EXTRA / RW (same for both modes: gzip-binary) ---
+            val extraPayload = ensureGzipBytesForWrite(
+                preferredGzip = rwGzipBytes,
+                editText = textRw,
+                fallbackJson = """{"type":"rw","msg":"Default extra"}"""
             )
+
+            val ok = helper.writeNatoPayloads(
+                npsMimeType = npsMime,
+                npsPayload = npsPayload,
+                extraMimeType = MIME_EXT_GZ,
+                extraPayload = extraPayload
+            )
+
+            // Keep RW vars consistent (gzip)
+            rwBytes = extraPayload
+            rwGzipBytes = extraPayload
+            rwIsGzip = true
+
             runOnUiThread {
+                refreshTextViewsFromBytes()
                 statusText.text = if (ok) "NATO write OK" else "NATO write FAILED"
                 pendingAction = PendingAction.NONE
+                updateTabSizes()
             }
         } finally {
             helper.close()
         }
     }
+
+
+
 
     private fun handleReadNato(tag: Tag) {
         val helper = NATOHelper.connect(tag, debug = true) ?: run {
@@ -952,10 +1243,33 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 if (payload == null) {
                     statusText.text = "NATO read FAILED or not NATO layout"
                 } else {
-                    textHistoric.setText(payload.npsPayload.toString(Charsets.UTF_8))
-                    textRw.setText(payload.extraPayload.toString(Charsets.UTF_8))
+                    // ✅ Old variables (used by refreshTextViewsFromBytes)
+                    roBytes = payload.npsPayload
+                    rwBytes = payload.extraPayload
+
+                    // ✅ New/canonical variables (used by updateTabSizes)
+                    // NATO: treat as gzip binary if it looks gzip, otherwise treat as plaintext
+                    val roIsGz = looksLikeGzip(payload.npsPayload)
+                    if (roIsGz) {
+                        roGzipBytes = payload.npsPayload
+                        roPlainText = null
+                        roIsPlaintext = false
+                    } else {
+                        roGzipBytes = null
+                        roPlainText = payload.npsPayload.toString(Charsets.UTF_8)
+                        roIsPlaintext = true
+                    }
+
+                    // RW: in your new model, RW is binary gzip (or at least we treat it that way)
+                    rwGzipBytes = payload.extraPayload
+
+                    // Refresh UI from the *old* byte variables (keeps existing behaviour)
+                    refreshTextViewsFromBytes()
+
                     statusText.text = "NATO read OK"
                 }
+
+                updateTabSizes()
                 pendingAction = PendingAction.NONE
             }
         } finally {
@@ -964,12 +1278,15 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     }
 
 
+
+
     private fun handleReadDualNdef(tag: Tag) {
-        var historicText: String? = null
-        var extraText: String? = null
         val errors = mutableListOf<String>()
 
-        // 1) RO / Historic via Android NDEF
+        var roRead: ByteArray? = null
+        var rwRead: ByteArray? = null
+
+        // 1) RO via Android NDEF
         val ndef = Ndef.get(tag)
         if (ndef != null) {
             try {
@@ -977,8 +1294,10 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 val msg = ndef.cachedNdefMessage ?: ndef.ndefMessage
                 if (msg != null && msg.records.isNotEmpty()) {
                     val rec = msg.records[0]
-                    // Assuming payload is UTF-8 JSON or text
-                    historicText = rec.payload.toString(Charsets.UTF_8)
+
+                    // NOTE: For MIME records, rec.payload is the raw payload bytes (no encoding header).
+                    // We treat it as "either plaintext UTF-8" or "gzip binary".
+                    roRead = rec.payload
                 } else {
                     errors += "No NDEF records on card"
                 }
@@ -991,15 +1310,14 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             errors += "Tag is not exposed as NDEF"
         }
 
-        // 2) RW / extra via DESFire app 0x665544
+        // 2) RW via DESFire file
         val helper = NDEFHelper.connect(tag, debug = true)
         if (helper != null) {
             try {
                 val bytes = helper.readExtraPlain()
                 if (bytes != null) {
-                    // Trim trailing zero padding
-                    val trimmed = bytes.dropLastWhile { it == 0.toByte() }.toByteArray()
-                    extraText = trimmed.toString(Charsets.UTF_8)
+                    // Trim trailing zero padding from fixed-size DESFire file
+                    rwRead = bytes.dropLastWhile { it == 0.toByte() }.toByteArray()
                 } else {
                     errors += "DESFire extra read returned null"
                 }
@@ -1013,26 +1331,49 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
 
         runOnUiThread {
-            historicText?.let { textHistoric.setText(it) }
-            extraText?.let { textRw.setText(it) }
+            // ✅ Old variables (used by refreshTextViewsFromBytes)
+            roRead?.let { roBytes = it }
+            rwRead?.let { rwBytes = it }
+
+            // ✅ New/canonical variables (used by updateTabSizes)
+            roRead?.let { bytes ->
+                if (looksLikeGzip(bytes)) {
+                    roGzipBytes = bytes
+                    roPlainText = null
+                    roIsPlaintext = false
+                } else {
+                    roGzipBytes = null
+                    roPlainText = bytes.toString(Charsets.UTF_8)
+                    roIsPlaintext = true
+                }
+            }
+
+            rwRead?.let { bytes ->
+                // In Dual, RW is *intended* to be gzip binary, but we allow plaintext too.
+                if (looksLikeGzip(bytes)) {
+                    rwGzipBytes = bytes
+                } else {
+                    rwGzipBytes = null
+                }
+            }
+
+            refreshTextViewsFromBytes()
 
             statusText.text = buildString {
                 append("READ Dual (NDEF + DESFire): ")
-                append(
-                    when {
-                        historicText != null && extraText != null -> "OK"
-                        historicText != null || extraText != null -> "partial"
-                        else -> "failed"
-                    }
-                )
+                append(if (errors.isEmpty()) "OK" else "partial/failed")
                 if (errors.isNotEmpty()) {
                     append("\n")
                     append(errors.joinToString("\n"))
                 }
             }
+
+            updateTabSizes()
             pendingAction = PendingAction.NONE
         }
     }
+
+
 
 
     private fun handleFormatForDualNdef(tag: Tag) {
@@ -1062,22 +1403,57 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
 
         try {
-            val npsText = textHistoric.text.toString().ifBlank {
-                """{"type":"historic","msg":"NPS default"}"""
-            }
-            val rwText = textRw.text.toString().ifBlank {
-                """{"type":"rw","msg":"Default RW extra data"}"""
+            val isPoc = (getSplitMode() == SPLIT_MODE_POC)
+
+            // --- RO (Type-4 NDEF) ---
+            val roMime: String
+            val npsBytes: ByteArray
+
+            if (isPoc) {
+                val roText = textHistoric.text?.toString().orEmpty()
+                    .ifBlank { """{"type":"historic","msg":"NPS default"}""" }
+
+                roMime = "application/x.nps.v1-0"
+                npsBytes = roText.toByteArray(Charsets.UTF_8)
+
+                // Keep vars consistent (plaintext)
+                roBytes = npsBytes
+                roGzipBytes = null
+                roIsGzip = false
+                roIsPlaintext = true
+                roPlainText = roText
+            } else {
+                roMime = MIME_NPS_GZ
+                npsBytes = ensureGzipBytesForWrite(
+                    preferredGzip = roGzipBytes,
+                    editText = textHistoric,
+                    fallbackJson = """{"type":"historic","msg":"NPS default"}"""
+                )
+
+                roBytes = npsBytes
+                roGzipBytes = npsBytes
+                roIsGzip = true
+                roIsPlaintext = false
+                roPlainText = null
             }
 
-            val npsBytes = npsText.toByteArray(Charsets.UTF_8)
-            val rwBytes  = rwText.toByteArray(Charsets.UTF_8)
+            // --- RW (DESFire extra) — always gzip-binary ---
+            val rwMime = MIME_EXT_GZ
+            val extraBytes = ensureGzipBytesForWrite(
+                preferredGzip = rwGzipBytes,
+                editText = textRw,
+                fallbackJson = """{"type":"rw","msg":"Default RW extra data"}"""
+            )
+
+            // Keep RW vars consistent (gzip)
+            rwBytes = extraBytes
+            rwGzipBytes = extraBytes
+            rwIsGzip = true
 
             // If RO part doesn't fit current 000001/E104 capacity, reformat PICC for Dual
-            val roFits = helper.canWriteType4NdefRo("application/x.nps.v1-0", npsBytes)
+            val roFits = helper.canWriteType4NdefRo(roMime, npsBytes)
             if (!roFits) {
-                val requiredCapacity = helper.requiredType4Capacity("application/x.nps.v1-0", npsBytes)
-
-                // pick a practical capacity (aligned + headroom)
+                val requiredCapacity = helper.requiredType4Capacity(roMime, npsBytes)
                 val newCapacity = helper.chooseNdefCapacity(requiredCapacity)
 
                 helper.close() // must close before reformat (new IsoDep session)
@@ -1110,10 +1486,10 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
                 try {
                     val ok = helper2.writeDualSectionNdef(
-                        roMimeType = "application/x.nps.v1-0",
+                        roMimeType = roMime,
                         roPayload  = npsBytes,
-                        rwMimeType = "application/x.ext.v1-0",
-                        rwPayload  = rwBytes
+                        rwMimeType = rwMime,
+                        rwPayload  = extraBytes
                     )
 
                     runOnUiThread {
@@ -1122,6 +1498,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                         } else {
                             "Dual write FAILED"
                         }
+                        refreshTextViewsFromBytes()
+                        updateTabSizes()
                         pendingAction = PendingAction.NONE
                     }
                 } finally {
@@ -1132,10 +1510,10 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
             // Normal path (fits)
             val ok = helper.writeDualSectionNdef(
-                roMimeType = "application/x.nps.v1-0",
+                roMimeType = roMime,
                 roPayload  = npsBytes,
-                rwMimeType = "application/x.ext.v1-0",
-                rwPayload  = rwBytes
+                rwMimeType = rwMime,
+                rwPayload  = extraBytes
             )
 
             runOnUiThread {
@@ -1144,6 +1522,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 } else {
                     "Dual write FAILED"
                 }
+                refreshTextViewsFromBytes()
+                updateTabSizes()
                 pendingAction = PendingAction.NONE
             }
 
@@ -1155,9 +1535,10 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             }
         } finally {
             // note: may already be closed earlier in the resize path; safe anyway
-            helper.close()
+            try { helper.close() } catch (_: Exception) {}
         }
     }
+
 
 
 
@@ -1178,17 +1559,52 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
 
     private fun handleWrite(helper: DesfireHelper) {
-        // Take whatever is in the text boxes; if empty, use the dummy JSON.
-        val histStr = textHistoric.text.toString()
-            .ifBlank { dummyHistoricPayload.toString(Charsets.UTF_8) }
 
-        val rwStr = textRw.text.toString()
-            .ifBlank { dummyRwPayload.toString(Charsets.UTF_8) }
+        val isPoc = (getSplitMode() == SPLIT_MODE_POC)
 
-        val histBytes = histStr.toByteArray(Charsets.UTF_8)
-        val rwBytes   = rwStr.toByteArray(Charsets.UTF_8)
+        // --- RO / historic ---
+        val historicBytes: ByteArray =
+            if (isPoc) {
+                val roText = textHistoric.text?.toString().orEmpty()
+                    .ifBlank { dummyHistoricPayload.toString(Charsets.UTF_8) }
 
-        val ok = helper.writeTestPayload(historic = histBytes, rw = rwBytes)
+                // POC rule: part 1 is plaintext
+                roBytes = roText.toByteArray(Charsets.UTF_8)
+                roGzipBytes = null
+                roIsGzip = false
+                roIsPlaintext = true
+                roPlainText = roText
+
+                roBytes
+            } else {
+                // Unified rule: part 1 is gzip-binary
+                val gz = ensureGzipBytesForWrite(
+                    preferredGzip = roGzipBytes,
+                    editText = textHistoric,
+                    fallbackJson = dummyHistoricPayload.toString(Charsets.UTF_8)
+                )
+
+                roBytes = gz
+                roGzipBytes = gz
+                roIsGzip = true
+                roIsPlaintext = false
+                roPlainText = null
+
+                gz
+            }
+
+        // --- RW (always gzip-binary) ---
+        val rwBytesOut = ensureGzipBytesForWrite(
+            preferredGzip = rwGzipBytes,
+            editText = textRw,
+            fallbackJson = dummyRwPayload.toString(Charsets.UTF_8)
+        )
+
+        rwBytes = rwBytesOut
+        rwGzipBytes = rwBytesOut
+        rwIsGzip = true
+
+        val ok = helper.writeTestPayload(historic = historicBytes, rw = rwBytesOut)
 
         val versionSummary = helper.getVersionSummary() ?: "Version: (error or not supported)"
         val uid = helper.getUidHex() ?: "UID: (unavailable)"
@@ -1199,12 +1615,14 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             } else {
                 "WRITE to card FAILED\n$versionSummary\nUID: $uid"
             }
-            // Reflect what we *attempted* to write
-            textHistoric.setText(histStr)
-            textRw.setText(rwStr)
+            refreshTextViewsFromBytes()
+            updateTabSizes()
             pendingAction = PendingAction.NONE
         }
     }
+
+
+
 
 
 
@@ -1218,14 +1636,19 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             if (payload == null) {
                 statusText.text = "READ from card FAILED\n$versionSummary\nUID: $uid"
             } else {
-                val histStr = payload.historic.toString(Charsets.UTF_8)
-                val rwStr   = payload.rw.toString(Charsets.UTF_8)
+                roBytes = payload.historic
+                rwBytes = payload.rw
 
-                textHistoric.setText(histStr)
-                textRw.setText(rwStr)
+                roGzipBytes = roBytes
+                rwGzipBytes = rwBytes
+
+                refreshTextViewsFromBytes()
                 statusText.text = "READ from card OK\n$versionSummary\nUID: $uid"
             }
+
+            updateTabSizes()
             pendingAction = PendingAction.NONE
         }
     }
+
 }
