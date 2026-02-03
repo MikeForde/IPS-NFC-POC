@@ -9,6 +9,7 @@ import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import android.nfc.tech.Ndef
+import android.util.Log
 import android.view.View
 import android.widget.AdapterView
 import okhttp3.OkHttpClient
@@ -23,9 +24,10 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
+import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TabHost
-
+import androidx.appcompat.app.AlertDialog
 
 
 class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
@@ -41,7 +43,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private var roIsGzip: Boolean = false
     private var rwIsGzip: Boolean = false
 
-    private enum class PendingAction { NONE, WRITE, READ, FORMAT, WRITE_DUAL_NDEF, FORMAT_FOR_NDEF, READ_DUAL_NDEF, WRITE_NATO, READ_NATO, FORMAT_NATO }
+    private enum class PendingAction { NONE, WRITE, READ, FORMAT, WRITE_DUAL_NDEF, FORMAT_FOR_NDEF, READ_DUAL_NDEF, WRITE_NATO, READ_NATO, FORMAT_NATO, CARD_INFO }
 
     private var nfcAdapter: NfcAdapter? = null
     private var pendingAction: PendingAction = PendingAction.NONE
@@ -72,7 +74,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private val PREFS = "ips_prefs"
     private val KEY_BASE_URL = "ips_base_url"
 
-    private val BASE_LOCAL = "http://localhost:5050"
+    private val BASE_LOCAL = "http://localhost:5049"
     private val BASE_AZURE = "https://ipsmern-dep.azurewebsites.net"
 
     private val KEY_POC_AUTO_DECOMPRESS = "poc_auto_decompress_rw"
@@ -159,6 +161,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private lateinit var tabRoSize: TextView
     private lateinit var tabRwLabel: TextView
     private lateinit var tabRwSize: TextView
+    private lateinit var buttonCardInfo: Button
+
 
 
 
@@ -227,6 +231,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         buttonWriteNato = findViewById(R.id.buttonWriteNato)
         buttonReadNato = findViewById(R.id.buttonReadNato)
         buttonFormatForNATO = findViewById(R.id.buttonFormatForNATO)
+        buttonCardInfo = findViewById(R.id.buttonCardInfo)
         val spinner = findViewById<Spinner>(R.id.spinnerIps)
 
         nfcAdapter = NfcAdapter.getDefaultAdapter(this)
@@ -287,6 +292,12 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             if (nfcAdapter == null) return@setOnClickListener
             pendingAction = PendingAction.FORMAT_NATO
             statusText.text = "FORMAT for NATO mode: tap DESFire card\n(This will FORMAT for NATO NDEF)"
+        }
+
+        buttonCardInfo.setOnClickListener {
+            if (nfcAdapter == null) return@setOnClickListener
+            pendingAction = PendingAction.CARD_INFO
+            statusText.text = "Card info mode: tap NFC card"
         }
 
         textHistoric.addTextChangedListener(object : android.text.TextWatcher {
@@ -574,6 +585,18 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         val currentAction = pendingAction
         if (currentAction == PendingAction.NONE) return
 
+        if (currentAction == PendingAction.CARD_INFO) {
+            try {
+                handleCardInfo(tag)
+            } catch (e: Exception) {
+                runOnUiThread {
+                    statusText.text = "Card info error: ${e.message}"
+                }
+            }
+            return
+        }
+
+
         // 🔹 Special case: WRITE_DUAL_NDEF uses NDEFHelper, so do NOT open DesfireHelper here
         if (currentAction == PendingAction.WRITE_DUAL_NDEF) {
             try {
@@ -667,6 +690,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 PendingAction.WRITE_NATO -> Unit
                 PendingAction.READ_NATO -> Unit
                 PendingAction.FORMAT_NATO -> Unit
+                PendingAction.CARD_INFO -> Unit
                 PendingAction.NONE  -> Unit
                 // 🚫 no WRITE_DUAL_NDEF here anymore
             }
@@ -682,7 +706,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
     private fun showSettingsDialog() {
         val baseOptions = arrayOf(
-            "Local (http://localhost:5050)",
+            "Local (http://localhost:5049)",
             "Azure (https://ipsmern-dep.azurewebsites.net)"
         )
         val protectOptions = arrayOf(
@@ -828,20 +852,71 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             .show()
     }
 
-    private fun capturePlaintextEditsIntoBytes() {
-        // Only treat textbox as authoritative when we are not gzipped
-        // AND the textbox doesn't look like a base64 display string.
-        val roText = textHistoric.text.toString()
-        if (!roIsGzip && !looksLikeBase64(roText)) {
-            roBytes = roText.toByteArray(Charsets.UTF_8)
-        }
+//    private fun capturePlaintextEditsIntoBytes() {
+//        // Only treat textbox as authoritative when we are not gzipped
+//        // AND the textbox doesn't look like a base64 display string.
+//        val roText = textHistoric.text.toString()
+//        if (!roIsGzip && !looksLikeBase64(roText)) {
+//            roBytes = roText.toByteArray(Charsets.UTF_8)
+//        }
+//
+//        val rwText = textRw.text.toString()
+//        if (!rwIsGzip && !looksLikeBase64(rwText)) {
+//            rwBytes = rwText.toByteArray(Charsets.UTF_8)
+//        }
+//
+//        updateTabSizes()
+//    }
+private val nfcExec = java.util.concurrent.Executors.newSingleThreadExecutor()
+    @Volatile private var nfcBusy = false
 
-        val rwText = textRw.text.toString()
-        if (!rwIsGzip && !looksLikeBase64(rwText)) {
-            rwBytes = rwText.toByteArray(Charsets.UTF_8)
-        }
+    private fun handleCardInfo(tag: Tag) {
+        if (nfcBusy) return
+        nfcBusy = true
 
-        updateTabSizes()
+        // Important: use tag.id + techList now if you want; but heavy IsoDep work in background.
+        runOnUiThread { statusText.text = "Reading card info..." }
+
+        nfcExec.execute {
+            try {
+                val report = CardInfoHelper.buildReport(tag, debug = true).text
+                runOnUiThread { showCardInfoDialog(report) }
+            } catch (e: Exception) {
+                runOnUiThread { statusText.text = "Card info error: ${e.message}" }
+            } finally {
+                nfcBusy = false
+                pendingAction = PendingAction.NONE
+            }
+        }
+    }
+
+    private fun showCardInfoDialog(report: String) {
+        val tv = TextView(this).apply {
+            text = report
+            setPadding(32, 24, 32, 24)
+            setTextIsSelectable(true)
+            typeface = android.graphics.Typeface.MONOSPACE
+        }
+        val scroll = android.widget.ScrollView(this).apply { addView(tv) }
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Card Info")
+            .setView(scroll)
+            .setPositiveButton("Close", null)
+            .show()
+        logLong("Card Info Report", report)
+        statusText.text = "Card info OK"
+    }
+
+
+    private fun logLong(tag: String, msg: String) {
+        val chunk = 3500  // keep under Logcat ~4k limit
+        var i = 0
+        while (i < msg.length) {
+            val end = (i + chunk).coerceAtMost(msg.length)
+            android.util.Log.d(tag, msg.substring(i, end))
+            i = end
+        }
     }
 
     // --- NEW: store the "real" payloads separately from the EditTexts ---
