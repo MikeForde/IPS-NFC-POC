@@ -317,43 +317,68 @@ class NATOHelper private constructor(
                 )
             }
 
-            // 6) Create EXTRA NDEF file (fileNo=3, ISO FID E105)
-            val extraSize = extraCapacityBytes
+            // 6) Compute EXTRA size from card free memory, then create EXTRA NDEF file (fileNo=3, ISO FID E105)
+
+// FreeMemory is PICC-level: select 000000 first
+            val PICC_AID = byteArrayOf(0x00, 0x00, 0x00)
+            if (!desfire.selectApplication(PICC_AID)) {
+                Log.e(TAG, "lowLevelFormatPiccForNatoNdef: failed to select PICC AID for freeMemory")
+                return false
+            }
+
+            val freeMemRaw = desfire.freeMemory()
+            if (freeMemRaw == null || freeMemRaw.size < 3) {
+                Log.e(TAG, "lowLevelFormatPiccForNatoNdef: freeMemory() returned null/short")
+                return false
+            }
+            val remaining = (freeMemRaw[0].toInt() and 0xFF) or
+                    ((freeMemRaw[1].toInt() and 0xFF) shl 8) or
+                    ((freeMemRaw[2].toInt() and 0xFF) shl 16)
+
+// Leave some safety room; align to 32 bytes (DESFire alloc granularity)
+            val safety = 128
+            val extraSize = (((remaining - safety).coerceAtLeast(256)) / 32) * 32
+
+// Back into NDEF app and re-auth
+            if (!desfire.selectApplication(NDEF_APP_AID)) {
+                Log.e(TAG, "lowLevelFormatPiccForNatoNdef: failed to re-select NDEF app")
+                return false
+            }
+            if (!desfire.authenticate(DEFAULT_DES_KEY, KEYNO_MASTER, KeyType.DES)) {
+                Log.e(TAG, "lowLevelFormatPiccForNatoNdef: app master auth failed (before create EXTRA)")
+                return false
+            }
+
+// Create EXTRA file sized to "rest of card"
             val extraSize0 = (extraSize and 0xFF).toByte()
             val extraSize1 = ((extraSize shr 8) and 0xFF).toByte()
             val extraSize2 = ((extraSize shr 16) and 0xFF).toByte()
 
-            // Free read & write: 0x00 0x00 (as in the spec example)
             val createExtraBody = byteArrayOf(
-                FILE_EXTRA,             // fileNo = 0x03
-                0x05, 0xE1.toByte(),    // ISO FID = E105
-                0x00,                   // comm settings (plain)
-                0xEE.toByte(), 0xEE.toByte(),            // access rights: free R/W
+                FILE_EXTRA,
+                0x05, 0xE1.toByte(),        // ISO FID = E105
+                0x00,                       // comm plain
+                0xEE.toByte(), 0xEE.toByte(),// free R/W
                 extraSize0, extraSize1, extraSize2
             )
+
             val respCreateExtra = sendNative(0xCD.toByte(), createExtraBody)
             val swCreateExtra = respCreateExtra.last().toInt() and 0xFF
             if (swCreateExtra != 0x00 && swCreateExtra != 0xDE) {
-                Log.e(
-                    TAG,
-                    "lowLevelFormatPiccForNatoNdef: create EXTRA file failed, status=0x${swCreateExtra.toString(16)}"
-                )
+                Log.e(TAG, "lowLevelFormatPiccForNatoNdef: create EXTRA file failed, status=0x${swCreateExtra.toString(16)}")
                 return false
             } else {
-                Log.d(
-                    TAG,
-                    "lowLevelFormatPiccForNatoNdef: create EXTRA file ok (or duplicate), status=0x${swCreateExtra.toString(16)}"
-                )
+                Log.d(TAG, "lowLevelFormatPiccForNatoNdef: create EXTRA file ok (or duplicate), extraSize=$extraSize")
             }
 
             // 7) Write CC contents with TWO TLVs
-            val maxNpsLenHi   = ((npsCapacityBytes   shr 8) and 0xFF).toByte()
-            val maxNpsLenLo   = (npsCapacityBytes    and 0xFF).toByte()
-            val maxExtraLenHi = ((extraCapacityBytes shr 8) and 0xFF).toByte()
-            val maxExtraLenLo = (extraCapacityBytes  and 0xFF).toByte()
+            val maxNpsLenHi   = ((npsCapacityBytes shr 8) and 0xFF).toByte()
+            val maxNpsLenLo   = (npsCapacityBytes and 0xFF).toByte()
+            val maxExtraLenHi = ((extraSize shr 8) and 0xFF).toByte()
+            val maxExtraLenLo = (extraSize and 0xFF).toByte()
 
             val cc = ByteArray(CC_FILE_SIZE) { 0 }
-            // Header
+// Header
             cc[0] = 0x00
             cc[1] = 0x17               // CCLEN = 32
             cc[2] = 0x20               // Mapping version 2.0
@@ -362,7 +387,7 @@ class NATOHelper private constructor(
             cc[5] = 0x00
             cc[6] = 0x34               // MLc
 
-            // TLV 1: NPS file (E104)
+// TLV 1: NPS file (E104)
             cc[7]  = 0x04              // T = NDEF File Control TLV
             cc[8]  = 0x06              // L = 6
             cc[9]  = 0xE1.toByte()
@@ -372,7 +397,7 @@ class NATOHelper private constructor(
             cc[13] = 0x00              // read access
             cc[14] = 0xFF.toByte()     // write not allowed (example per spec)
 
-            // TLV 2: EXTRA file (E105)
+// TLV 2: EXTRA file (E105)
             cc[15] = 0x04              // T = NDEF File Control TLV
             cc[16] = 0x06              // L = 6
             cc[17] = 0xE1.toByte()
@@ -388,7 +413,8 @@ class NATOHelper private constructor(
                 return false
             }
 
-            // 8) Seed NPS NDEF file
+            // 8) Seed NPS NDEF file (NO ZERO PADDING)
+            // Build the full NDEF message bytes (record(s))
             val ndefRecord = buildMimeNdefRecord(seedNpsMimeType, seedNpsPayload)
             val ndefMsgLen = ndefRecord.size
             if (ndefMsgLen + 2 > npsCapacityBytes) {
@@ -399,12 +425,21 @@ class NATOHelper private constructor(
                 return false
             }
 
-            val ndefFileBytes = ByteArray(npsCapacityBytes) { 0 }
-            ndefFileBytes[0] = ((ndefMsgLen shr 8) and 0xFF).toByte()
-            ndefFileBytes[1] = (ndefMsgLen and 0xFF).toByte()
-            System.arraycopy(ndefRecord, 0, ndefFileBytes, 2, ndefMsgLen)
+            // Write only: NLEN(2) + message bytes
+            val seeded = ByteArray(2 + ndefMsgLen)
+            seeded[0] = ((ndefMsgLen shr 8) and 0xFF).toByte()
+            seeded[1] = (ndefMsgLen and 0xFF).toByte()
+            System.arraycopy(ndefRecord, 0, seeded, 2, ndefMsgLen)
 
-            val npsWriteOk = writeStandardFileInCurrentApp(FILE_NPS, ndefFileBytes)
+            // (Optional but nice) first set NLEN=0 then write full content.
+            // It avoids any partial-read weirdness during write windows.
+            val nlenZeroOk = writeStandardFileSlice(FILE_NPS, 0, byteArrayOf(0x00, 0x00))
+            if (!nlenZeroOk) {
+                Log.e(TAG, "lowLevelFormatPiccForNatoNdef: pre-write NLEN=0 failed")
+                return false
+            }
+
+            val npsWriteOk = writeStandardFileSlice(FILE_NPS, 0, seeded)
             if (!npsWriteOk) {
                 Log.e(TAG, "lowLevelFormatPiccForNatoNdef: writing seeded NPS file failed")
                 return false
@@ -414,6 +449,32 @@ class NATOHelper private constructor(
             true
         } catch (e: Exception) {
             Log.e(TAG, "lowLevelFormatPiccForNatoNdef failed", e)
+            false
+        }
+    }
+
+    fun writeStandardFileSlice(fileNo: Byte, offset: Int, data: ByteArray): Boolean {
+        // payload: fileNo (1) + offset (3 LSB) + length (3 LSB) + data (N)
+        val len = data.size
+        val payload = ByteArray(1 + 3 + 3 + len)
+        payload[0] = fileNo
+
+        // offset (3 bytes LSB)
+        payload[1] = (offset and 0xFF).toByte()
+        payload[2] = ((offset shr 8) and 0xFF).toByte()
+        payload[3] = ((offset shr 16) and 0xFF).toByte()
+
+        // length (3 bytes LSB)
+        payload[4] = (len and 0xFF).toByte()
+        payload[5] = ((len shr 8) and 0xFF).toByte()
+        payload[6] = ((len shr 16) and 0xFF).toByte()
+
+        System.arraycopy(data, 0, payload, 7, len)
+
+        return try {
+            desfire.writeData(payload)
+        } catch (e: Exception) {
+            Log.e(TAG, "writeStandardFileSlice: writeData failed (fileNo=$fileNo, offset=$offset, len=$len)", e)
             false
         }
     }
@@ -634,6 +695,43 @@ class NATOHelper private constructor(
         }
         return resp
     }
+
+    private fun freeMemoryBytes(): Int {
+        // freeMemory() returns 3 bytes, LSB first
+        val b = desfire.freeMemory() ?: return 0
+        return (b[0].toInt() and 0xFF) or
+                ((b[1].toInt() and 0xFF) shl 8) or
+                ((b[2].toInt() and 0xFF) shl 16)
+    }
+
+    private fun roundDown(value: Int, step: Int): Int {
+        if (step <= 0) return value
+        return (value / step) * step
+    }
+
+    private fun writeStandardFilePartialInCurrentApp(fileNo: Byte, offset: Int, data: ByteArray): Boolean {
+        // Payload format expected by DESFireEV1.write():
+        // [fileNo][offset(3 LSB)][len(3 LSB)][data...]
+        val off = offset
+        val len = data.size
+
+        val payload = ByteArray(1 + 3 + 3 + len)
+        var p = 0
+        payload[p++] = fileNo
+        // offset (LSB)
+        payload[p++] = (off and 0xFF).toByte()
+        payload[p++] = ((off shr 8) and 0xFF).toByte()
+        payload[p++] = ((off shr 16) and 0xFF).toByte()
+        // length (LSB)
+        payload[p++] = (len and 0xFF).toByte()
+        payload[p++] = ((len shr 8) and 0xFF).toByte()
+        payload[p++] = ((len shr 16) and 0xFF).toByte()
+
+        System.arraycopy(data, 0, payload, p, len)
+
+        return desfire.writeData(payload)
+    }
+
 
     // -------------------------------------------------------------------------
     // Static / companion stuff
