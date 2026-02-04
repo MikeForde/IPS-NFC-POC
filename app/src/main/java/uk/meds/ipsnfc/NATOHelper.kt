@@ -328,7 +328,7 @@ class NATOHelper private constructor(
                 FILE_EXTRA,             // fileNo = 0x03
                 0x05, 0xE1.toByte(),    // ISO FID = E105
                 0x00,                   // comm settings (plain)
-                0x00, 0x00,             // access rights: free R/W
+                0xEE.toByte(), 0xEE.toByte(),            // access rights: free R/W
                 extraSize0, extraSize1, extraSize2
             )
             val respCreateExtra = sendNative(0xCD.toByte(), createExtraBody)
