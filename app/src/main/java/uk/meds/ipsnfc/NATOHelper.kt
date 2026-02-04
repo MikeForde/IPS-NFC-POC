@@ -355,7 +355,7 @@ class NATOHelper private constructor(
             val cc = ByteArray(CC_FILE_SIZE) { 0 }
             // Header
             cc[0] = 0x00
-            cc[1] = 0x20               // CCLEN = 32
+            cc[1] = 0x17               // CCLEN = 32
             cc[2] = 0x20               // Mapping version 2.0
             cc[3] = 0x00
             cc[4] = 0x3B               // MLe
@@ -649,7 +649,7 @@ class NATOHelper private constructor(
         private const val FILE_NPS: Byte   = 0x02
         private const val FILE_EXTRA: Byte = 0x03
 
-        private const val CC_FILE_SIZE = 32
+        private const val CC_FILE_SIZE = 23
 
         private val DEFAULT_DES_KEY = ByteArray(8) { 0x00 }
 
