@@ -86,6 +86,11 @@ class NATOHelper private constructor(
                 return false
             }
 
+            if (!lockE104ReadFreeWriteBlocked()) {
+                Log.e(TAG, "writeNatoPayloads: failed to lock E104")
+                return false
+            }
+
             val extraOk = writeNdefFileInCurrentApp(FILE_EXTRA, extraMimeType, extraPayload)
             if (!extraOk) {
                 Log.e(TAG, "writeNatoPayloads: failed to write EXTRA file")
@@ -299,7 +304,7 @@ class NATOHelper private constructor(
                 FILE_NPS,               // fileNo = 0x02
                 0x04, 0xE1.toByte(),    // ISO FID = E104
                 0x00,                   // comm settings (plain)
-                0xE0.toByte(), 0x00,    // access rights
+                0xEE.toByte(), 0xEE.toByte(), // TEMP rights: master key for everything
                 npsSize0, npsSize1, npsSize2
             )
             val respCreateNps = sendNative(0xCD.toByte(), createNpsBody)
@@ -449,6 +454,34 @@ class NATOHelper private constructor(
             true
         } catch (e: Exception) {
             Log.e(TAG, "lowLevelFormatPiccForNatoNdef failed", e)
+            false
+        }
+    }
+
+    private fun lockE104ReadFreeWriteBlocked(): Boolean {
+        // Desired final profile:
+        // Read key = E (free)
+        // Write key = F (blocked)
+        // Read/Write key = F (blocked)
+        // Change key = F (blocked)
+        //
+        // AccessRights bytes are: [ (RW<<4 | Change), (Read<<4 | Write) ]
+        val ar0 = 0xFF.toByte() // RW=F, Change=F
+        val ar1 = 0xEF.toByte() // Read=E, Write=F
+
+        val body = byteArrayOf(
+            FILE_NPS,
+            0x00,        // comm settings plain
+            ar0, ar1
+        )
+
+        val resp = sendNative(0x5F.toByte(), body)
+        val sw = resp.last().toInt() and 0xFF
+        return if (sw == 0x00) {
+            Log.d(TAG, "lockE104ReadFreeWriteBlocked: locked E104 (FF EF)")
+            true
+        } else {
+            Log.e(TAG, "lockE104ReadFreeWriteBlocked: failed status=0x${sw.toString(16)}")
             false
         }
     }
