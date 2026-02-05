@@ -240,9 +240,8 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Format Buttons"
+            android:text="Utils"
             android:textStyle="bold"
-            android:textColor="@android:color/holo_red_dark"
             android:layout_marginBottom="2dp" />
 
         <LinearLayout
@@ -257,27 +256,27 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="DES"
+                android:text="Wipe"
                 android:textAllCaps="false"
                 android:textColor="@android:color/holo_red_dark" />
 
-            <Button
-                android:id="@+id/buttonFormatForNDEF"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Dual"
-                android:textAllCaps="false"
-                android:textColor="@android:color/holo_red_dark" />
+<!--            <Button-->
+<!--                android:id="@+id/buttonFormatForNDEF"-->
+<!--                android:layout_width="0dp"-->
+<!--                android:layout_height="wrap_content"-->
+<!--                android:layout_weight="1"-->
+<!--                android:text="Dual"-->
+<!--                android:textAllCaps="false"-->
+<!--                android:textColor="@android:color/holo_red_dark" />-->
 
-            <Button
-                android:id="@+id/buttonFormatForNATO"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="NDEF"
-                android:textAllCaps="false"
-                android:textColor="@android:color/holo_red_dark" />
+<!--            <Button-->
+<!--                android:id="@+id/buttonFormatForNATO"-->
+<!--                android:layout_width="0dp"-->
+<!--                android:layout_height="wrap_content"-->
+<!--                android:layout_weight="1"-->
+<!--                android:text="NDEF"-->
+<!--                android:textAllCaps="false"-->
+<!--                android:textColor="@android:color/holo_red_dark" />-->
 
             <Button
                 android:id="@+id/buttonCardInfo"

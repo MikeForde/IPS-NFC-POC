@@ -226,11 +226,11 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         buttonRead = findViewById(R.id.buttonRead)
         buttonFormatApp = findViewById(R.id.buttonFormatApp)
         buttonWriteDualNdef = findViewById(R.id.buttonWriteDualNdef)
-        buttonFormatForNDEF = findViewById(R.id.buttonFormatForNDEF)
+        //buttonFormatForNDEF = findViewById(R.id.buttonFormatForNDEF)
         buttonReadDual = findViewById(R.id.buttonReadDual)
         buttonWriteNato = findViewById(R.id.buttonWriteNato)
         buttonReadNato = findViewById(R.id.buttonReadNato)
-        buttonFormatForNATO = findViewById(R.id.buttonFormatForNATO)
+        //buttonFormatForNATO = findViewById(R.id.buttonFormatForNATO)
         buttonCardInfo = findViewById(R.id.buttonCardInfo)
         val spinner = findViewById<Spinner>(R.id.spinnerIps)
 
@@ -264,11 +264,11 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             statusText.text = "WRITE NDEF dual mode: tap DESFire card\n(This will FORMAT and recreate the app/files)"
         }
 
-        buttonFormatForNDEF.setOnClickListener {
-            if (nfcAdapter == null) return@setOnClickListener
-            pendingAction = PendingAction.FORMAT_FOR_NDEF
-            statusText.text = "FORMAT For NDEF dual mode: tap DESFire card\n(This will FORMAT for NDEF + DES)"
-        }
+//        buttonFormatForNDEF.setOnClickListener {
+//            if (nfcAdapter == null) return@setOnClickListener
+//            pendingAction = PendingAction.FORMAT_FOR_NDEF
+//            statusText.text = "FORMAT For NDEF dual mode: tap DESFire card\n(This will FORMAT for NDEF + DES)"
+//        }
 
         buttonReadDual.setOnClickListener {
             if (nfcAdapter == null) return@setOnClickListener
@@ -288,11 +288,11 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             statusText.text = "READ NATO mode: tap DESFire card\n(This will READ NATO NDEF)"
         }
 
-        buttonFormatForNATO.setOnClickListener {
-            if (nfcAdapter == null) return@setOnClickListener
-            pendingAction = PendingAction.FORMAT_NATO
-            statusText.text = "FORMAT for NATO mode: tap DESFire card\n(This will FORMAT for NATO NDEF)"
-        }
+//        buttonFormatForNATO.setOnClickListener {
+//            if (nfcAdapter == null) return@setOnClickListener
+//            pendingAction = PendingAction.FORMAT_NATO
+//            statusText.text = "FORMAT for NATO mode: tap DESFire card\n(This will FORMAT for NATO NDEF)"
+//        }
 
         buttonCardInfo.setOnClickListener {
             if (nfcAdapter == null) return@setOnClickListener
